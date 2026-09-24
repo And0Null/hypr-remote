@@ -1,0 +1,953 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no" />
+    <meta name="theme-color" content="#000000" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black" />
+    <link rel="manifest" href="/manifest.webmanifest" />
+    <link rel="icon" href="/icons/icon-192.png" />
+    <link rel="apple-touch-icon" href="/icons/icon-192.png" />
+    <title>hypr-remote</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <!-- Doto is a dot-matrix face, to match the rice's clocks. Falls back to
+         plain monospace if the phone is offline. -->
+    <link href="https://fonts.googleapis.com/css2?family=Doto:wght@900&family=Space+Mono&display=swap" rel="stylesheet" />
+    <style>
+      :root {
+        --bg: #000;
+        --surface: #111;
+        --raised: #1c1c1c;
+        --line: #262626;
+        --fg: #fff;
+        --muted: #8a8a8a;
+        --faint: #5a5a5a;
+        --red: #d71921;
+        --dot: "Doto", ui-monospace, monospace;
+        --mono: "Space Mono", ui-monospace, monospace;
+        --nav: 4.75rem;
+      }
+
+      * {
+        box-sizing: border-box;
+        -webkit-tap-highlight-color: transparent;
+      }
+
+      html,
+      body {
+        margin: 0;
+        background: var(--bg);
+        color: var(--fg);
+        font-family: var(--mono);
+        text-transform: lowercase;
+        -webkit-user-select: none;
+        user-select: none;
+        overscroll-behavior: none;
+      }
+
+      input,
+      textarea {
+        text-transform: none;
+        -webkit-user-select: text;
+        user-select: text;
+      }
+
+      main {
+        max-width: 30rem;
+        margin: 0 auto;
+        padding: max(1.25rem, env(safe-area-inset-top)) 1rem
+          calc(var(--nav) + env(safe-area-inset-bottom) + 1.5rem);
+      }
+
+      header {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        font-size: 0.75rem;
+        color: var(--muted);
+        letter-spacing: 0.08em;
+        margin-bottom: 1rem;
+      }
+
+      .status {
+        display: flex;
+        align-items: center;
+        gap: 0.5rem;
+      }
+
+      .status i {
+        width: 0.5rem;
+        height: 0.5rem;
+        border-radius: 50%;
+        background: var(--red);
+      }
+
+      .status[data-live="true"] i {
+        background: var(--fg);
+      }
+
+      .tab {
+        display: none;
+        gap: 0.9rem;
+      }
+
+      .tab[data-active="true"] {
+        display: grid;
+      }
+
+      .card {
+        background: var(--surface);
+        border: 1px solid var(--line);
+        border-radius: 1.75rem;
+        padding: 1.2rem;
+        min-width: 0;
+      }
+
+      .label {
+        margin: 0;
+        font-size: 0.7rem;
+        letter-spacing: 0.12em;
+        color: var(--muted);
+      }
+
+      [hidden] {
+        display: none !important;
+      }
+
+      .hint {
+        margin: 0.75rem 0 0;
+        font-size: 0.72rem;
+        line-height: 1.5;
+        color: var(--muted);
+      }
+
+      .hint code {
+        color: var(--fg);
+        word-break: break-all;
+      }
+
+      .dot {
+        font-family: var(--dot);
+        font-weight: 900;
+        line-height: 0.9;
+      }
+
+      .row {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 0.75rem;
+      }
+
+      .truncate {
+        overflow: hidden;
+        white-space: nowrap;
+        text-overflow: ellipsis;
+      }
+
+      .stack {
+        display: grid;
+        gap: 0.6rem;
+        margin-top: 1rem;
+      }
+
+      .grid-2 {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 0.6rem;
+      }
+
+      .grid-3 {
+        display: grid;
+        grid-template-columns: 1fr 1.4fr 1fr;
+        gap: 0.6rem;
+      }
+
+      button {
+        font: inherit;
+        text-transform: lowercase;
+        color: var(--fg);
+        background: var(--raised);
+        border: 1px solid var(--line);
+        border-radius: 999px;
+        min-height: 3.25rem;
+        padding: 0 1rem;
+        cursor: pointer;
+        touch-action: manipulation;
+        transition:
+          transform 120ms ease,
+          background-color 150ms ease,
+          color 150ms ease;
+      }
+
+      button:active {
+        transform: scale(0.95);
+        background: #2a2a2a;
+      }
+
+      button.primary {
+        background: var(--fg);
+        color: var(--bg);
+      }
+
+      button[disabled] {
+        opacity: 0.35;
+        pointer-events: none;
+      }
+
+      button svg {
+        width: 1.3rem;
+        height: 1.3rem;
+        display: block;
+        margin: auto;
+      }
+
+      .pills {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.5rem;
+        margin-top: 1rem;
+      }
+
+      .pills button {
+        min-height: 2.5rem;
+        font-size: 0.8rem;
+      }
+
+      .pills button[data-active="true"] {
+        background: var(--fg);
+        color: var(--bg);
+        border-color: var(--fg);
+      }
+
+      /* Workspaces */
+      .workspaces {
+        display: grid;
+        grid-template-columns: repeat(5, 1fr);
+        gap: 0.5rem;
+        margin-top: 1rem;
+      }
+
+      .workspaces button {
+        min-height: 3.1rem;
+        padding: 0;
+        border-radius: 1rem;
+        font-family: var(--dot);
+        font-weight: 900;
+        font-size: 1.35rem;
+        color: var(--faint);
+        position: relative;
+      }
+
+      .workspaces button[data-occupied="true"] {
+        color: var(--fg);
+      }
+
+      /* A dot under workspaces that have windows open. */
+      .workspaces button[data-occupied="true"]::after {
+        content: "";
+        position: absolute;
+        bottom: 0.35rem;
+        left: 50%;
+        width: 0.25rem;
+        height: 0.25rem;
+        margin-left: -0.125rem;
+        border-radius: 50%;
+        background: currentColor;
+      }
+
+      .workspaces button[data-active="true"] {
+        background: var(--red);
+        border-color: var(--red);
+        color: var(--fg);
+      }
+
+      /* Windows: swipe a row left to close it. */
+      .windows {
+        display: grid;
+        gap: 0.5rem;
+        margin-top: 1rem;
+      }
+
+      .window {
+        position: relative;
+        border-radius: 1.1rem;
+        overflow: hidden;
+        background: var(--red);
+      }
+
+      .window-body {
+        position: relative;
+        display: grid;
+        grid-template-columns: 2.25rem 1fr auto;
+        align-items: center;
+        gap: 0.75rem;
+        padding: 0.7rem 0.6rem 0.7rem 0.8rem;
+        background: var(--raised);
+        border: 1px solid var(--line);
+        border-radius: 1.1rem;
+        touch-action: pan-y;
+        transition: transform 250ms ease;
+      }
+
+      .window-body[data-dragging="true"] {
+        transition: none;
+      }
+
+      .window[data-focused="true"] .window-body {
+        border-color: var(--fg);
+      }
+
+      .window .ws {
+        font-family: var(--dot);
+        font-weight: 900;
+        font-size: 1.3rem;
+        text-align: center;
+      }
+
+      .window .app {
+        font-size: 0.68rem;
+        letter-spacing: 0.1em;
+        color: var(--muted);
+      }
+
+      .window .title {
+        font-size: 0.85rem;
+        margin-top: 0.15rem;
+      }
+
+      .window .move {
+        min-height: 2.25rem;
+        font-size: 0.75rem;
+        padding: 0 0.8rem;
+      }
+
+      .window .close-label {
+        position: absolute;
+        right: 1.1rem;
+        top: 50%;
+        transform: translateY(-50%);
+        font-size: 0.8rem;
+      }
+
+      .move-picker {
+        display: grid;
+        grid-template-columns: repeat(5, 1fr);
+        gap: 0.4rem;
+        padding: 0.6rem 0.2rem 0.2rem;
+        background: var(--bg);
+      }
+
+      .move-picker button {
+        min-height: 2.5rem;
+        padding: 0;
+        border-radius: 0.8rem;
+        font-family: var(--dot);
+        font-weight: 900;
+        font-size: 1.1rem;
+      }
+
+      /* Meters and sliders */
+      .meter {
+        height: 0.35rem;
+        margin-top: 0.9rem;
+        border-radius: 999px;
+        background: var(--line);
+        overflow: hidden;
+      }
+
+      .meter span {
+        display: block;
+        height: 100%;
+        width: 0;
+        background: var(--fg);
+        transition: width 300ms ease;
+      }
+
+      .meter[data-alert="true"] span {
+        background: var(--red);
+      }
+
+      input[type="range"] {
+        width: 100%;
+        margin: 1rem 0 0;
+        height: 2.25rem;
+        background: transparent;
+        -webkit-appearance: none;
+        appearance: none;
+      }
+
+      input[type="range"]::-webkit-slider-runnable-track {
+        height: 0.35rem;
+        border-radius: 999px;
+        background: linear-gradient(to right, var(--fg) var(--fill, 0%), var(--line) var(--fill, 0%));
+      }
+
+      input[type="range"]::-webkit-slider-thumb {
+        -webkit-appearance: none;
+        width: 1.6rem;
+        height: 1.6rem;
+        margin-top: -0.625rem;
+        border-radius: 50%;
+        background: var(--fg);
+        border: 0.3rem solid var(--bg);
+      }
+
+      input[type="range"]::-moz-range-track {
+        height: 0.35rem;
+        border-radius: 999px;
+        background: var(--line);
+      }
+
+      input[type="range"]::-moz-range-progress {
+        height: 0.35rem;
+        border-radius: 999px;
+        background: var(--fg);
+      }
+
+      input[type="range"]::-moz-range-thumb {
+        width: 1.1rem;
+        height: 1.1rem;
+        border-radius: 50%;
+        background: var(--fg);
+        border: 0.25rem solid var(--bg);
+      }
+
+      /* Switches */
+      .switch {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 1rem;
+        width: 100%;
+        min-height: 3.5rem;
+        border-radius: 1.1rem;
+        text-align: left;
+      }
+
+      .switch i {
+        flex: none;
+        position: relative;
+        width: 2.6rem;
+        height: 1.4rem;
+        border-radius: 999px;
+        background: #3a3a3a;
+        transition: background-color 150ms ease;
+      }
+
+      .switch i::after {
+        content: "";
+        position: absolute;
+        top: 0.2rem;
+        left: 0.2rem;
+        width: 1rem;
+        height: 1rem;
+        border-radius: 50%;
+        background: var(--muted);
+        transition:
+          transform 150ms ease,
+          background-color 150ms ease;
+      }
+
+      .switch[data-on="true"] i {
+        background: var(--fg);
+      }
+
+      .switch[data-on="true"] i::after {
+        transform: translateX(1.2rem);
+        background: var(--bg);
+      }
+
+      .switch small {
+        display: block;
+        color: var(--muted);
+        font-size: 0.68rem;
+        margin-top: 0.15rem;
+      }
+
+      /* Hold-to-confirm: the fill shows how long is left before it fires. */
+      .hold {
+        position: relative;
+        overflow: hidden;
+        width: 100%;
+      }
+
+      .hold .fill {
+        position: absolute;
+        inset: 0;
+        background: var(--red);
+        transform-origin: left;
+        transform: scaleX(0);
+      }
+
+      .hold[data-holding="true"] .fill {
+        transform: scaleX(1);
+        transition: transform 800ms linear;
+      }
+
+      .hold > span:last-child {
+        position: relative;
+      }
+
+      /* Text inputs */
+      textarea,
+      .field {
+        width: 100%;
+        font: inherit;
+        font-size: 0.95rem;
+        color: var(--fg);
+        background: var(--raised);
+        border: 1px solid var(--line);
+        border-radius: 1.1rem;
+        padding: 0.85rem 1rem;
+        outline: none;
+      }
+
+      textarea {
+        min-height: 7rem;
+        resize: vertical;
+        margin-top: 1rem;
+      }
+
+      textarea:focus,
+      .field:focus {
+        border-color: var(--muted);
+      }
+
+      /* Screen preview */
+      .screen {
+        position: relative;
+        margin-top: 1rem;
+        aspect-ratio: 16 / 9;
+        border-radius: 1rem;
+        overflow: hidden;
+        background: var(--raised);
+        border: 1px solid var(--line);
+      }
+
+      .screen img {
+        width: 100%;
+        height: 100%;
+        object-fit: contain;
+        display: block;
+      }
+
+      .screen p {
+        position: absolute;
+        inset: 0;
+        display: grid;
+        place-items: center;
+        margin: 0;
+        font-size: 0.75rem;
+        color: var(--muted);
+      }
+
+      /* Stats */
+      .stats {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 1.25rem 1rem;
+        margin-top: 1rem;
+      }
+
+      .stat .dot {
+        font-size: 2.2rem;
+        margin-top: 0.4rem;
+      }
+
+      .stat .unit {
+        font-size: 0.7rem;
+        color: var(--muted);
+        margin-left: 0.25rem;
+      }
+
+      /* Touchpad */
+      .pad {
+        position: relative;
+        margin-top: 1rem;
+        height: 22rem;
+        border-radius: 1.5rem;
+        background:
+          radial-gradient(circle, #2a2a2a 1px, transparent 1.5px) 0 0 / 1.1rem 1.1rem,
+          var(--raised);
+        border: 1px solid var(--line);
+        touch-action: none;
+      }
+
+      .pad p {
+        position: absolute;
+        inset: auto 0 1rem;
+        margin: 0;
+        text-align: center;
+        font-size: 0.68rem;
+        letter-spacing: 0.1em;
+        color: var(--faint);
+        pointer-events: none;
+      }
+
+      .keys {
+        display: grid;
+        grid-template-columns: repeat(4, 1fr);
+        gap: 0.5rem;
+        margin-top: 0.75rem;
+      }
+
+      .keys button {
+        min-height: 2.75rem;
+        padding: 0;
+        font-size: 0.78rem;
+      }
+
+      .slides {
+        display: grid;
+        grid-template-columns: 1fr 1.6fr;
+        gap: 0.6rem;
+        margin-top: 1rem;
+      }
+
+      .slides button {
+        min-height: 7rem;
+        border-radius: 1.5rem;
+        font-size: 1rem;
+      }
+
+      /* Bottom navigation */
+      nav {
+        position: fixed;
+        inset: auto 0 0;
+        display: flex;
+        justify-content: center;
+        padding: 0.6rem 1rem calc(0.6rem + env(safe-area-inset-bottom));
+        background: linear-gradient(to top, #000 60%, transparent);
+      }
+
+      nav div {
+        display: grid;
+        grid-template-columns: repeat(4, 1fr);
+        gap: 0.25rem;
+        width: min(100%, 28rem);
+        padding: 0.3rem;
+        border-radius: 999px;
+        background: var(--surface);
+        border: 1px solid var(--line);
+      }
+
+      nav button {
+        min-height: 2.9rem;
+        padding: 0;
+        border: 0;
+        background: transparent;
+        color: var(--muted);
+        font-size: 0.78rem;
+      }
+
+      nav button[aria-selected="true"] {
+        background: var(--fg);
+        color: var(--bg);
+      }
+
+      .banner {
+        display: none;
+        margin-bottom: 1rem;
+        padding: 1rem 1.2rem;
+        border-radius: 1.25rem;
+        border: 1px solid var(--red);
+        font-size: 0.8rem;
+        line-height: 1.5;
+      }
+
+      .banner[data-show="true"] {
+        display: block;
+      }
+
+      .toast {
+        position: fixed;
+        left: 50%;
+        bottom: calc(var(--nav) + env(safe-area-inset-bottom) + 0.75rem);
+        transform: translate(-50%, 1rem);
+        padding: 0.7rem 1.1rem;
+        border-radius: 999px;
+        background: var(--fg);
+        color: var(--bg);
+        font-size: 0.8rem;
+        opacity: 0;
+        pointer-events: none;
+        transition:
+          opacity 200ms ease,
+          transform 200ms ease;
+      }
+
+      .toast[data-show="true"] {
+        opacity: 1;
+        transform: translate(-50%, 0);
+      }
+
+      .progress {
+        height: 0.25rem;
+        margin-top: 0.75rem;
+        border-radius: 999px;
+        background: var(--line);
+        overflow: hidden;
+        display: none;
+      }
+
+      .progress span {
+        display: block;
+        height: 100%;
+        width: 0;
+        background: var(--fg);
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <header>
+        <span>hypr-remote</span>
+        <span class="status" id="status" data-live="false"><i></i><span id="status-text">connecting</span></span>
+      </header>
+
+      <p class="banner" id="banner"></p>
+
+      <!-- ================================================================ -->
+      <!-- desk                                                             -->
+      <!-- ================================================================ -->
+      <section class="tab" id="tab-desk" data-active="true">
+        <div class="card">
+          <div class="row">
+            <div style="min-width: 0">
+              <p class="label">workspace</p>
+              <p class="label truncate" id="window" style="margin-top: 0.35rem; color: var(--fg)">—</p>
+            </div>
+            <span class="dot" id="workspace" style="font-size: 3.8rem">--</span>
+          </div>
+          <div class="workspaces" id="workspaces"></div>
+        </div>
+
+        <div class="card">
+          <div class="row">
+            <p class="label">windows</p>
+            <p class="label" id="window-count"></p>
+          </div>
+          <div class="windows" id="windows"></div>
+          <p class="hint">tap to focus · swipe left to close</p>
+        </div>
+
+        <div class="card">
+          <p class="label" id="media-status">nothing playing</p>
+          <p class="truncate" id="media-title" style="margin: 0.5rem 0 0; font-size: 1.05rem">—</p>
+          <p class="label truncate" id="media-artist" style="margin-top: 0.25rem">&nbsp;</p>
+          <div class="grid-3" style="margin-top: 1rem">
+            <button aria-label="previous track" data-action='{"type":"media","command":"previous"}'>
+              <svg viewBox="0 0 24 24" fill="currentColor"><path d="M6 5h2v14H6zM20 5v14L9 12z" /></svg>
+            </button>
+            <button class="primary" aria-label="play or pause" data-action='{"type":"media","command":"play-pause"}'>
+              <svg viewBox="0 0 24 24" fill="currentColor" id="play-icon"><path d="M8 5v14l11-7z" /></svg>
+            </button>
+            <button aria-label="next track" data-action='{"type":"media","command":"next"}'>
+              <svg viewBox="0 0 24 24" fill="currentColor"><path d="M16 5h2v14h-2zM4 5v14l11-7z" /></svg>
+            </button>
+          </div>
+        </div>
+      </section>
+
+      <!-- ================================================================ -->
+      <!-- control                                                          -->
+      <!-- ================================================================ -->
+      <section class="tab" id="tab-control">
+        <div class="card">
+          <p class="label">scenes</p>
+          <div class="grid-2" id="scenes" style="margin-top: 1rem"></div>
+        </div>
+
+        <div class="card">
+          <div class="row">
+            <p class="label" id="volume-label">volume</p>
+            <span class="dot" id="volume" style="font-size: 2.4rem">--</span>
+          </div>
+          <input type="range" id="volume-slider" min="0" max="100" aria-label="volume" />
+          <div class="grid-3" style="margin-top: 0.5rem">
+            <button aria-label="volume down" data-repeat data-action='{"type":"volume","command":"down"}'>
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M5 12h14" /></svg>
+            </button>
+            <button data-action='{"type":"volume","command":"mute"}'>mute</button>
+            <button aria-label="volume up" data-repeat data-action='{"type":"volume","command":"up"}'>
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M5 12h14M12 5v14" /></svg>
+            </button>
+          </div>
+          <p class="label" style="margin-top: 1.25rem">sound output</p>
+          <div class="pills" id="sinks"></div>
+        </div>
+
+        <div class="card">
+          <div class="row">
+            <p class="label">brightness</p>
+            <span class="dot" id="brightness" style="font-size: 2.4rem">--</span>
+          </div>
+          <input type="range" id="brightness-slider" min="5" max="100" aria-label="brightness" />
+        </div>
+
+        <div class="card">
+          <p class="label">notifications</p>
+          <div class="stack">
+            <button class="switch" id="dnd" data-on="false">
+              <span>do not disturb<small id="notification-count">—</small></span><i></i>
+            </button>
+            <button data-action='{"type":"notifications","op":"clear"}'>clear all notifications</button>
+          </div>
+        </div>
+
+        <div class="card">
+          <p class="label">radios</p>
+          <div class="stack">
+            <button class="switch" id="wifi" data-on="false">
+              <span>wi-fi<small>turning it off disconnects this phone</small></span><i></i>
+            </button>
+            <button class="switch" id="bluetooth" data-on="false">
+              <span>bluetooth<small id="bluetooth-note">&nbsp;</small></span><i></i>
+            </button>
+          </div>
+        </div>
+
+        <button class="hold" id="lock" data-hold='{"type":"lock"}' aria-label="hold to lock the screen">
+          <span class="fill"></span><span>hold to lock</span>
+        </button>
+      </section>
+
+      <!-- ================================================================ -->
+      <!-- bridge                                                           -->
+      <!-- ================================================================ -->
+      <section class="tab" id="tab-bridge">
+        <div class="card">
+          <p class="label">clipboard</p>
+          <textarea id="clipboard" placeholder="type or paste here…" spellcheck="false"></textarea>
+          <div class="grid-2" style="margin-top: 0.6rem">
+            <button class="primary" id="clipboard-send">send →</button>
+            <button id="clipboard-get">← get</button>
+          </div>
+        </div>
+
+        <div class="card">
+          <p class="label">send to laptop</p>
+          <div class="stack">
+            <input class="field" id="link" type="url" inputmode="url" placeholder="https://…" autocomplete="off" />
+            <button id="link-open">open link on laptop</button>
+            <button class="primary" id="file-pick">send files to ~/downloads</button>
+            <input id="file" type="file" multiple hidden />
+          </div>
+          <div class="progress" id="upload-progress"><span></span></div>
+        </div>
+
+        <div class="card">
+          <div class="row">
+            <p class="label">screen</p>
+            <p class="label" id="screen-status">paused</p>
+          </div>
+          <div class="pills" id="monitors"></div>
+          <div class="screen">
+            <img id="screen" alt="" hidden />
+            <p id="screen-empty">pick a monitor</p>
+          </div>
+        </div>
+
+        <div class="card">
+          <p class="label">system</p>
+          <div class="stats">
+            <div class="stat">
+              <p class="label">cpu</p>
+              <p class="dot" style="margin: 0.4rem 0 0"><span id="cpu">--</span><span class="unit">%</span></p>
+              <div class="meter" id="cpu-meter"><span></span></div>
+            </div>
+            <div class="stat">
+              <p class="label">memory</p>
+              <p class="dot" style="margin: 0.4rem 0 0"><span id="memory">--</span><span class="unit">gb</span></p>
+              <div class="meter" id="memory-meter"><span></span></div>
+            </div>
+            <div class="stat">
+              <p class="label" id="battery-label">battery</p>
+              <p class="dot" style="margin: 0.4rem 0 0"><span id="battery">--</span><span class="unit">%</span></p>
+              <div class="meter" id="battery-meter"><span></span></div>
+            </div>
+            <div class="stat">
+              <p class="label">temperature</p>
+              <p class="dot" style="margin: 0.4rem 0 0"><span id="temperature">--</span><span class="unit">°c</span></p>
+              <div class="meter" id="temperature-meter"><span></span></div>
+            </div>
+          </div>
+          <p class="hint" id="uptime"></p>
+        </div>
+
+        <div class="card" id="install-card">
+          <p class="label">install as an app</p>
+          <p class="hint" id="install-text"></p>
+          <div class="stack" id="install-actions"></div>
+        </div>
+      </section>
+
+      <!-- ================================================================ -->
+      <!-- input                                                            -->
+      <!-- ================================================================ -->
+      <section class="tab" id="tab-input">
+        <div class="card">
+          <p class="label">touchpad</p>
+          <div class="pad" id="pad"><p>drag · tap to click · two fingers to scroll · two-finger tap to right-click</p></div>
+          <div class="grid-2" style="margin-top: 0.6rem">
+            <button data-action='{"type":"pointer-click","button":"left"}' data-needs="clicks">left click</button>
+            <button data-action='{"type":"pointer-click","button":"right"}' data-needs="clicks">right click</button>
+          </div>
+          <p class="hint" id="clicks-hint" hidden>
+            moving works now. clicking and scrolling need ydotool — see the readme, or run
+            <code>bun run install-service</code> after installing it.
+          </p>
+        </div>
+
+        <div class="card">
+          <p class="label">keyboard</p>
+          <input class="field" id="typing" style="margin-top: 1rem" placeholder="tap here and type — it goes straight to the laptop" autocomplete="off" autocapitalize="off" spellcheck="false" />
+          <div class="keys">
+            <button data-key="escape" data-needs="keyboard">esc</button>
+            <button data-key="tab" data-needs="keyboard">tab</button>
+            <button data-key="backspace" data-needs="keyboard" data-repeat>⌫</button>
+            <button data-key="enter" data-needs="keyboard">enter</button>
+            <button data-key="left" data-needs="keyboard" data-repeat>←</button>
+            <button data-key="up" data-needs="keyboard" data-repeat>↑</button>
+            <button data-key="down" data-needs="keyboard" data-repeat>↓</button>
+            <button data-key="right" data-needs="keyboard" data-repeat>→</button>
+            <button data-key="copy" data-needs="keyboard">copy</button>
+            <button data-key="paste" data-needs="keyboard">paste</button>
+            <button data-key="undo" data-needs="keyboard">undo</button>
+            <button data-key="select-all" data-needs="keyboard">all</button>
+          </div>
+          <p class="hint" id="keyboard-hint" hidden>typing needs wtype: <code>sudo dnf install wtype</code></p>
+        </div>
+
+        <div class="card">
+          <p class="label">slides</p>
+          <div class="slides">
+            <button data-key="left" data-needs="keyboard">← back</button>
+            <button class="primary" data-key="right" data-needs="keyboard">next →</button>
+          </div>
+          <div class="grid-3" style="margin-top: 0.6rem">
+            <button data-key="f5" data-needs="keyboard">start</button>
+            <button data-key="blank" data-needs="keyboard">blank</button>
+            <button data-key="escape" data-needs="keyboard">end</button>
+          </div>
+        </div>
+      </section>
+    </main>
+
+    <nav>
+      <div role="tablist">
+        <button role="tab" data-tab="desk" aria-selected="true">desk</button>
+        <button role="tab" data-tab="control" aria-selected="false">control</button>
+        <button role="tab" data-tab="bridge" aria-selected="false">bridge</button>
+        <button role="tab" data-tab="input" aria-selected="false">input</button>
+      </div>
+    </nav>
+
+    <p class="toast" id="toast" role="status"></p>
+
+    <script src="/app.js" type="module"></script>
+  </body>
+</html>

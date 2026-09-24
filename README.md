@@ -1,0 +1,114 @@
+# hypr-remote
+
+Control a Hyprland desktop from your phone over home Wi-Fi. The phone gets a
+web page, installable as an app, with four tabs:
+
+- **desk**: workspaces, the window list (tap to focus, swipe left to close,
+  move to another workspace) and media.
+- **control**: scenes, volume and sound output, brightness, do not disturb and
+  clearing notifications, Wi-Fi and Bluetooth, and hold-to-lock.
+- **bridge**: shared clipboard in both directions, opening links, sending
+  files to `~/Downloads`, a live preview of any monitor, and system stats.
+- **input**: touchpad, live typing and a presentation clicker.
+
+## Run
+
+```bash
+bun install
+bun run install-service   # start now and at every login (systemd user service)
+# or, in the foreground:
+bun start
+```
+
+Scan the QR code from the terminal (`journalctl --user -u hypr-remote`). To
+show it in your own bar or widget, the current code is always at
+`~/.cache/hypr-remote/pair.png` (and the link at `pair-url`). The phone stays
+paired across restarts. Delete `~/.config/hypr-remote/token` to unpair every
+phone.
+
+Stop autostart: `systemctl --user disable --now hypr-remote ydotoold`.
+
+### Keyboard, clicks and scrolling
+
+Moving the pointer works out of the box, through Hyprland. Typing needs
+`wtype`; clicks and scrolling need `ydotool`, which writes to `/dev/uinput`.
+On Fedora, `scripts/setup-input.sh` does all of this. Elsewhere:
+
+```bash
+sudo pacman -S wtype ydotool          # Arch, CachyOS (Fedora: sudo dnf install wtype ydotool)
+groups | grep -q input || sudo usermod -aG input "$USER"   # then log out and back in
+echo 'KERNEL=="uinput", GROUP="input", MODE="0660", OPTIONS+="static_node=uinput"' \
+  | sudo tee /etc/udev/rules.d/80-uinput.rules
+sudo udevadm control --reload && sudo udevadm trigger
+bun run install-service   # adds a ydotoold user service
+```
+
+The udev rule lets every member of the `input` group create virtual input
+devices, which means any program running as your user can inject keystrokes.
+
+### Install as an app (HTTPS)
+
+Browsers only install apps and allow clipboard writes over HTTPS. The server
+makes its own certificate authority in `~/.config/hypr-remote/tls` and serves
+HTTPS on 4443. The bridge tab walks you through it: download the certificate,
+install it as a CA certificate on the phone, then open the secure link.
+
+### Scenes
+
+`~/.config/hypr-remote/scenes.json` is created on first run with movie,
+focus, night and day. Each scene can set `volume`, `brightness`, `dnd` and
+`media` (`"play"` or `"pause"`). Restart the service after editing it.
+
+## Works on
+
+Any Linux distro running Hyprland: Fedora, Arch, CachyOS and the rest. It
+needs [Bun](https://bun.sh) and a recent Hyprland. It does not start under
+GNOME, KDE, Sway or other compositors.
+
+These work anywhere Hyprland runs: workspaces, windows, the pointer, media,
+volume, brightness, clipboard, screen preview, links and files, stats,
+pairing and HTTPS. They use `hyprctl`, `playerctl`, `wpctl` and `pactl`
+(PipeWire), `brightnessctl`, `wl-clipboard`, `grim`, `notify-send` and
+`openssl`.
+
+The rest depends on your setup. A missing tool turns off its feature and
+leaves everything else working.
+
+| Feature                    | Needs                         | Common alternatives that won't work |
+| -------------------------- | ----------------------------- | ----------------------------------- |
+| Do not disturb, clearing   | swaync                        | mako, dunst                         |
+| Wi-Fi toggle               | NetworkManager (`nmcli`)      | iwd, systemd-networkd               |
+| Bluetooth toggle           | BlueZ (`bluetoothctl`)        |                                     |
+| Lock                       | hyprlock                      | swaylock (the button does nothing)  |
+| Typing                     | wtype                         |                                     |
+| Clicks and scrolling       | ydotool, `/dev/uinput` access |                                     |
+
+### Firewall
+
+The phone connects on ports 4000 and 4443. Fedora Workstation allows them
+already, and plain Arch has no firewall. With ufw (CachyOS may enable it):
+
+```bash
+sudo ufw allow 4000,4443/tcp
+```
+
+With firewalld on other setups:
+
+```bash
+sudo firewall-cmd --permanent --add-port=4000/tcp --add-port=4443/tcp && sudo firewall-cmd --reload
+```
+
+`PORT` and `HTTPS_PORT` override 4000 and 4443.
+
+## How it works
+
+- `src/server.ts` serves the page, a WebSocket, `/screen`, `/upload` and
+  `/ca.crt`. Everything except the page, its assets and the certificate needs
+  the pairing token.
+- `src/actions.ts` is the whole list of things the phone can do, validated
+  with zod. Commands run with a fixed argv and no shell. Window addresses,
+  sound outputs and monitor names are checked against live lists.
+- `src/state.ts` reads the desktop. Window and workspace changes arrive live
+  from Hyprland's event socket; the rest is polled only while a phone is
+  connected.
+- `public/` is the phone page: plain HTML and JS, no build step.

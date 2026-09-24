@@ -1,0 +1,710 @@
+// hypr-remote phone client. Plain JS, no build step: the server serves this
+// file as-is.
+
+const $ = (id) => document.getElementById(id);
+const pad2 = (n) => String(n).padStart(2, "0");
+
+/* -------------------------------------------------------------------------- */
+/* Pairing                                                                    */
+/* -------------------------------------------------------------------------- */
+
+// The terminal's QR code carries ?t=<token>. Keep it, then drop it from the
+// address bar so it isn't left in screenshots or history.
+const params = new URLSearchParams(location.search);
+function storage(action, value) {
+  try {
+    if (action === "get") return localStorage.getItem("hypr-remote-token");
+    localStorage.setItem("hypr-remote-token", value);
+  } catch {
+    return null;
+  }
+}
+if (params.get("t")) {
+  storage("set", params.get("t"));
+  history.replaceState(null, "", location.pathname);
+}
+const token = storage("get") ?? params.get("t");
+
+/* -------------------------------------------------------------------------- */
+/* Connection                                                                 */
+/* -------------------------------------------------------------------------- */
+
+let socket = null;
+let retry = 500;
+let everOpened = false;
+let state = null;
+
+function showBanner(text) {
+  $("banner").textContent = text;
+  $("banner").dataset.show = text ? "true" : "false";
+}
+
+let toastTimer;
+function toast(text) {
+  $("toast").textContent = text;
+  $("toast").dataset.show = "true";
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => ($("toast").dataset.show = "false"), 1800);
+}
+
+function connect() {
+  if (!token) {
+    showBanner("not paired. scan the qr code in the terminal, or in the control center on your laptop.");
+    return;
+  }
+  const scheme = location.protocol === "https:" ? "wss" : "ws";
+  socket = new WebSocket(`${scheme}://${location.host}/ws?t=${encodeURIComponent(token)}`);
+
+  socket.onopen = () => {
+    everOpened = true;
+    retry = 500;
+    $("status").dataset.live = "true";
+    $("status-text").textContent = "live";
+    showBanner("");
+  };
+
+  socket.onmessage = (event) => {
+    const message = JSON.parse(event.data);
+    if (message.type === "state") render(message.state);
+    if (message.type === "toast") toast(message.text);
+    if (message.type === "clipboard") receiveClipboard(message.text);
+  };
+
+  socket.onclose = () => {
+    $("status").dataset.live = "false";
+    $("status-text").textContent = "offline";
+    // Refused before ever opening is almost always a stale token.
+    if (!everOpened) showBanner("couldn't connect. if the laptop is on, re-scan its qr code to pair again.");
+    setTimeout(connect, retry);
+    retry = Math.min(retry * 2, 8000);
+  };
+}
+
+function send(action, { buzz = true } = {}) {
+  if (socket?.readyState !== WebSocket.OPEN) return false;
+  socket.send(JSON.stringify(action));
+  if (buzz) navigator.vibrate?.(8);
+  return true;
+}
+
+/* -------------------------------------------------------------------------- */
+/* Tabs                                                                       */
+/* -------------------------------------------------------------------------- */
+
+function showTab(name) {
+  document.querySelectorAll("[role=tab]").forEach((tab) => {
+    tab.setAttribute("aria-selected", String(tab.dataset.tab === name));
+  });
+  document.querySelectorAll(".tab").forEach((section) => {
+    section.dataset.active = String(section.id === `tab-${name}`);
+  });
+  try {
+    localStorage.setItem("hypr-remote-tab", name);
+  } catch {}
+  updateScreenPolling();
+}
+
+document.querySelectorAll("[role=tab]").forEach((tab) =>
+  tab.addEventListener("click", () => showTab(tab.dataset.tab)),
+);
+try {
+  showTab(localStorage.getItem("hypr-remote-tab") ?? "desk");
+} catch {}
+
+/* -------------------------------------------------------------------------- */
+/* Rendering                                                                  */
+/* -------------------------------------------------------------------------- */
+
+function setMeter(id, percent, alert = false) {
+  const meter = $(id);
+  meter.dataset.alert = String(alert);
+  meter.firstElementChild.style.width = `${Math.max(0, Math.min(100, percent ?? 0))}%`;
+}
+
+// Sliders are left alone while a finger is on them, or the next state update
+// would yank the thumb back mid-drag.
+const dragging = new Set();
+function setSlider(id, value) {
+  const slider = $(id);
+  if (dragging.has(id) || value == null) return;
+  slider.value = value;
+  slider.style.setProperty("--fill", `${((value - slider.min) / (slider.max - slider.min)) * 100}%`);
+}
+
+function render(next) {
+  state = next;
+  renderDesk();
+  renderControl();
+  renderBridge();
+  renderInput();
+}
+
+function renderDesk() {
+  $("workspace").textContent = state.activeWorkspace ? pad2(state.activeWorkspace) : "--";
+  $("window").textContent = state.activeWindow ?? "—";
+
+  const occupied = new Map(state.workspaces.map((w) => [w.id, w.windows]));
+  const grid = $("workspaces");
+  if (!grid.children.length) {
+    for (let id = 1; id <= 10; id++) {
+      const button = document.createElement("button");
+      button.textContent = id === 10 ? "0" : String(id);
+      button.setAttribute("aria-label", `workspace ${id}`);
+      button.dataset.action = JSON.stringify({ type: "workspace", id });
+      grid.append(button);
+    }
+  }
+  [...grid.children].forEach((button, index) => {
+    button.dataset.active = String(index + 1 === state.activeWorkspace);
+    button.dataset.occupied = String((occupied.get(index + 1) ?? 0) > 0);
+  });
+
+  renderWindows();
+
+  const media = state.media;
+  $("media-status").textContent = media?.status ? `${media.status} · ${media.player}` : "nothing playing";
+  $("media-title").textContent = media?.title || "—";
+  $("media-artist").textContent = media?.artist || " ";
+  $("play-icon").innerHTML =
+    media?.status === "Playing" ? '<path d="M7 5h4v14H7zM13 5h4v14h-4z" />' : '<path d="M8 5v14l11-7z" />';
+}
+
+// Rebuilt only when the set of windows changes, so a row mid-swipe isn't
+// replaced under the finger by a routine state update.
+let windowsKey = "";
+let movingAddress = null;
+
+function renderWindows() {
+  const windows = state.windows;
+  $("window-count").textContent = String(windows.length);
+  const key = JSON.stringify(windows.map((w) => [w.address, w.title, w.workspace, w.focused])) + movingAddress;
+  if (key === windowsKey) return;
+  windowsKey = key;
+
+  const list = $("windows");
+  list.replaceChildren(
+    ...windows.map((win) => {
+      const row = document.createElement("div");
+      row.className = "window";
+      row.dataset.focused = String(win.focused);
+      row.innerHTML = `
+        <span class="close-label">close</span>
+        <div class="window-body">
+          <span class="ws">${win.workspace}</span>
+          <div style="min-width: 0">
+            <p class="app truncate" style="margin: 0"></p>
+            <p class="title truncate" style="margin: 0"></p>
+          </div>
+          <button class="move">move</button>
+        </div>`;
+      // textContent, not innerHTML: window titles are arbitrary text.
+      row.querySelector(".app").textContent = win.app;
+      row.querySelector(".title").textContent = win.title;
+      row.querySelector(".move").addEventListener("click", (event) => {
+        event.stopPropagation();
+        movingAddress = movingAddress === win.address ? null : win.address;
+        renderWindows();
+      });
+
+      if (movingAddress === win.address) {
+        const picker = document.createElement("div");
+        picker.className = "move-picker";
+        for (let id = 1; id <= 10; id++) {
+          const button = document.createElement("button");
+          button.textContent = id === 10 ? "0" : String(id);
+          button.disabled = id === win.workspace;
+          button.addEventListener("click", () => {
+            send({ type: "window-move", address: win.address, workspace: id });
+            movingAddress = null;
+          });
+          picker.append(button);
+        }
+        row.append(picker);
+      }
+
+      attachSwipe(row, win);
+      return row;
+    }),
+  );
+}
+
+/** Swipe left past a third of the row to close it; a tap focuses it. */
+function attachSwipe(row, win) {
+  const body = row.querySelector(".window-body");
+  let startX = null;
+  let startY = null;
+  let dx = 0;
+  let swiping = false;
+
+  body.addEventListener("pointerdown", (event) => {
+    if (event.target.closest("button")) return;
+    startX = event.clientX;
+    startY = event.clientY;
+    dx = 0;
+    swiping = false;
+    body.setPointerCapture(event.pointerId);
+  });
+
+  body.addEventListener("pointermove", (event) => {
+    if (startX === null) return;
+    dx = Math.min(0, event.clientX - startX);
+    if (!swiping && Math.abs(dx) > 10 && Math.abs(dx) > Math.abs(event.clientY - startY)) swiping = true;
+    if (swiping) {
+      body.dataset.dragging = "true";
+      body.style.transform = `translateX(${dx}px)`;
+    }
+  });
+
+  const end = () => {
+    if (startX === null) return;
+    body.dataset.dragging = "false";
+    if (swiping && -dx > row.clientWidth / 3) {
+      body.style.transform = "translateX(-100%)";
+      send({ type: "window", op: "close", address: win.address });
+    } else {
+      body.style.transform = "";
+      if (!swiping) send({ type: "window", op: "focus", address: win.address });
+    }
+    startX = null;
+  };
+  body.addEventListener("pointerup", end);
+  body.addEventListener("pointercancel", () => {
+    body.dataset.dragging = "false";
+    body.style.transform = "";
+    startX = null;
+  });
+}
+
+function renderControl() {
+  // Scenes
+  const scenes = $("scenes");
+  if (scenes.children.length !== state.scenes.length) {
+    scenes.replaceChildren(
+      ...state.scenes.map((scene) => {
+        const button = document.createElement("button");
+        button.textContent = scene.label;
+        button.style.minHeight = "4rem";
+        button.style.borderRadius = "1.25rem";
+        button.dataset.action = JSON.stringify({ type: "scene", id: scene.id });
+        return button;
+      }),
+    );
+  }
+
+  // Volume
+  const volume = state.volume;
+  $("volume").textContent = volume ? pad2(volume.level) : "--";
+  $("volume-label").textContent = volume?.muted ? "volume · muted" : "volume";
+  setSlider("volume-slider", volume?.level);
+
+  const sinks = $("sinks");
+  const sinksKey = JSON.stringify(state.sinks);
+  if (sinks.dataset.key !== sinksKey) {
+    sinks.dataset.key = sinksKey;
+    sinks.replaceChildren(
+      ...state.sinks.map((sink) => {
+        const button = document.createElement("button");
+        button.textContent = sink.label;
+        button.dataset.active = String(sink.active);
+        button.dataset.action = JSON.stringify({ type: "sink", name: sink.name });
+        return button;
+      }),
+    );
+  }
+
+  // Brightness
+  $("brightness").textContent = state.brightness == null ? "--" : pad2(state.brightness);
+  setSlider("brightness-slider", state.brightness);
+
+  // Notifications
+  const notifications = state.notifications;
+  $("dnd").dataset.on = String(Boolean(notifications?.dnd));
+  $("notification-count").textContent = notifications
+    ? `${notifications.count} notification${notifications.count === 1 ? "" : "s"}`
+    : "swaync isn't running";
+
+  // Radios
+  $("wifi").dataset.on = String(Boolean(state.radios.wifi));
+  $("bluetooth").dataset.on = String(Boolean(state.radios.bluetooth));
+  $("bluetooth-note").textContent = state.radios.bluetooth === null ? "no adapter" : " ";
+}
+
+function renderBridge() {
+  // Monitors for the screen preview.
+  const monitors = $("monitors");
+  const key = state.monitors.map((m) => m.name).join();
+  if (monitors.dataset.key !== key) {
+    monitors.dataset.key = key;
+    monitors.replaceChildren(
+      ...state.monitors.map((monitor) => {
+        const button = document.createElement("button");
+        button.textContent = monitor.name;
+        button.addEventListener("click", () => {
+          previewMonitor = previewMonitor === monitor.name ? null : monitor.name;
+          renderMonitorPills();
+          updateScreenPolling();
+        });
+        button.dataset.name = monitor.name;
+        return button;
+      }),
+    );
+    renderMonitorPills();
+  }
+
+  // Stats
+  const stats = state.stats;
+  $("cpu").textContent = stats.cpu == null ? "--" : pad2(stats.cpu);
+  setMeter("cpu-meter", stats.cpu, stats.cpu > 85);
+  if (stats.memory) {
+    $("memory").textContent = (stats.memory.used / 1024).toFixed(1);
+    setMeter("memory-meter", (stats.memory.used / stats.memory.total) * 100);
+  }
+  if (stats.battery) {
+    $("battery").textContent = pad2(stats.battery.level);
+    $("battery-label").textContent = stats.battery.charging ? "battery · charging" : "battery";
+    setMeter("battery-meter", stats.battery.level, stats.battery.level <= 15 && !stats.battery.charging);
+  }
+  $("temperature").textContent = stats.temperature ?? "--";
+  setMeter("temperature-meter", stats.temperature, stats.temperature >= 85);
+  if (stats.uptimeMinutes != null) {
+    const hours = Math.floor(stats.uptimeMinutes / 60);
+    $("uptime").textContent = `up ${hours ? `${hours}h ` : ""}${stats.uptimeMinutes % 60}m`;
+  }
+}
+
+function renderInput() {
+  const { keyboard, clicks } = state.input;
+  document.querySelectorAll('[data-needs="keyboard"]').forEach((b) => (b.disabled = !keyboard));
+  document.querySelectorAll('[data-needs="clicks"]').forEach((b) => (b.disabled = !clicks));
+  $("typing").disabled = !keyboard;
+  $("keyboard-hint").hidden = keyboard;
+  $("clicks-hint").hidden = clicks;
+}
+
+/* -------------------------------------------------------------------------- */
+/* Buttons                                                                    */
+/* -------------------------------------------------------------------------- */
+
+// data-action sends its JSON; data-key presses a named key. Either can carry
+// data-repeat to keep firing while held (volume, arrows, backspace).
+let repeatTimer = null;
+function stopRepeat() {
+  clearTimeout(repeatTimer);
+  clearInterval(repeatTimer);
+  repeatTimer = null;
+}
+
+document.addEventListener("pointerdown", (event) => {
+  const button = event.target.closest("[data-action], [data-key]");
+  if (!button || button.disabled) return;
+  const action = button.dataset.action
+    ? JSON.parse(button.dataset.action)
+    : { type: "key", key: button.dataset.key };
+  send(action);
+  if (button.hasAttribute("data-repeat")) {
+    repeatTimer = setTimeout(() => {
+      repeatTimer = setInterval(() => send(action, { buzz: false }), 110);
+    }, 400);
+  }
+});
+["pointerup", "pointercancel"].forEach((type) => document.addEventListener(type, stopRepeat));
+
+// Sliders send while dragging, at most every 80ms.
+function wireSlider(id, toAction) {
+  const slider = $(id);
+  let last = 0;
+  slider.addEventListener("pointerdown", () => dragging.add(id));
+  slider.addEventListener("input", () => {
+    slider.style.setProperty("--fill", `${((slider.value - slider.min) / (slider.max - slider.min)) * 100}%`);
+    if (Date.now() - last < 80) return;
+    last = Date.now();
+    send(toAction(Number(slider.value)), { buzz: false });
+  });
+  slider.addEventListener("change", () => {
+    send(toAction(Number(slider.value)), { buzz: false });
+    dragging.delete(id);
+  });
+}
+wireSlider("volume-slider", (level) => ({ type: "volume-set", level }));
+wireSlider("brightness-slider", (level) => ({ type: "brightness-set", level }));
+
+$("dnd").addEventListener("click", () => send({ type: "notifications", op: "toggle-dnd" }));
+$("bluetooth").addEventListener("click", () =>
+  send({ type: "radio", device: "bluetooth", on: $("bluetooth").dataset.on !== "true" }),
+);
+
+// Wi-Fi off cuts this very connection, and nothing on the phone can bring it
+// back. Turning it off takes a second tap within three seconds.
+let wifiArmed = null;
+$("wifi").addEventListener("click", () => {
+  const on = $("wifi").dataset.on === "true";
+  if (!on) {
+    send({ type: "radio", device: "wifi", on: true });
+    return;
+  }
+  if (wifiArmed) {
+    clearTimeout(wifiArmed);
+    wifiArmed = null;
+    send({ type: "radio", device: "wifi", on: false });
+    return;
+  }
+  toast("tap again to turn wi-fi off — you'll lose this remote");
+  wifiArmed = setTimeout(() => (wifiArmed = null), 3000);
+});
+
+// Hold-to-confirm (lock): a stray tap in a pocket shouldn't lock the laptop.
+document.querySelectorAll("[data-hold]").forEach((button) => {
+  let timer = null;
+  const cancel = () => {
+    clearTimeout(timer);
+    button.dataset.holding = "false";
+  };
+  button.addEventListener("pointerdown", () => {
+    button.dataset.holding = "true";
+    timer = setTimeout(() => {
+      send(JSON.parse(button.dataset.hold));
+      navigator.vibrate?.([20, 40, 20]);
+      cancel();
+    }, 800);
+  });
+  ["pointerup", "pointercancel", "pointerleave"].forEach((type) => button.addEventListener(type, cancel));
+  button.addEventListener("contextmenu", (event) => event.preventDefault());
+});
+
+/* -------------------------------------------------------------------------- */
+/* Bridge: clipboard, links, files, screen                                    */
+/* -------------------------------------------------------------------------- */
+
+$("clipboard-send").addEventListener("click", () => {
+  const text = $("clipboard").value;
+  if (!text) return toast("nothing to send");
+  send({ type: "clipboard-set", text });
+});
+
+$("clipboard-get").addEventListener("click", () => send({ type: "clipboard-get" }));
+
+async function receiveClipboard(text) {
+  $("clipboard").value = text;
+  if (!text) return toast("laptop clipboard is empty");
+  // Writing to the phone's clipboard needs HTTPS; on plain HTTP the text is
+  // still in the box, ready to copy by hand.
+  try {
+    await navigator.clipboard.writeText(text);
+    toast("copied to phone");
+  } catch {
+    toast("got it — long-press the box to copy");
+  }
+}
+
+$("link-open").addEventListener("click", () => {
+  const url = $("link").value.trim();
+  if (!url) return toast("paste a link first");
+  send({ type: "open-link", url: /^https?:\/\//i.test(url) ? url : `https://${url}` });
+});
+
+$("file-pick").addEventListener("click", () => $("file").click());
+$("file").addEventListener("change", () => {
+  const files = [...$("file").files];
+  if (!files.length) return;
+  const form = new FormData();
+  files.forEach((file) => form.append("file", file));
+
+  // XHR rather than fetch: it reports upload progress.
+  const request = new XMLHttpRequest();
+  const bar = $("upload-progress");
+  bar.style.display = "block";
+  request.upload.onprogress = (event) => {
+    if (event.lengthComputable) bar.firstElementChild.style.width = `${(event.loaded / event.total) * 100}%`;
+  };
+  request.onloadend = () => {
+    bar.style.display = "none";
+    bar.firstElementChild.style.width = "0";
+    $("file").value = "";
+    if (request.status === 200) {
+      const { saved } = JSON.parse(request.responseText);
+      toast(saved.length === 1 ? `saved ${saved[0]}` : `saved ${saved.length} files`);
+    } else {
+      toast("upload failed");
+    }
+  };
+  request.open("POST", `/upload?t=${encodeURIComponent(token)}`);
+  request.send(form);
+});
+
+// Screen preview: polled only while the bridge tab is open and a monitor is
+// picked, and each frame is requested only after the last one arrived.
+let previewMonitor = null;
+let previewTimer = null;
+
+function renderMonitorPills() {
+  document.querySelectorAll("#monitors button").forEach((button) => {
+    button.dataset.active = String(button.dataset.name === previewMonitor);
+  });
+}
+
+function updateScreenPolling() {
+  const visible = $("tab-bridge")?.dataset.active === "true" && document.visibilityState === "visible";
+  clearTimeout(previewTimer);
+  if (!previewMonitor || !visible) {
+    $("screen-status").textContent = "paused";
+    if (!previewMonitor) {
+      $("screen").hidden = true;
+      $("screen-empty").hidden = false;
+    }
+    return;
+  }
+  $("screen-status").textContent = "live";
+  const image = new Image();
+  image.onload = () => {
+    $("screen").src = image.src;
+    $("screen").hidden = false;
+    $("screen-empty").hidden = true;
+    previewTimer = setTimeout(updateScreenPolling, 1200);
+  };
+  image.onerror = () => (previewTimer = setTimeout(updateScreenPolling, 3000));
+  image.src = `/screen?m=${encodeURIComponent(previewMonitor)}&t=${encodeURIComponent(token)}&_=${Date.now()}`;
+}
+document.addEventListener("visibilitychange", updateScreenPolling);
+
+/* -------------------------------------------------------------------------- */
+/* Install (HTTPS + certificate)                                              */
+/* -------------------------------------------------------------------------- */
+
+async function renderInstall() {
+  const text = $("install-text");
+  const actions = $("install-actions");
+  if (window.matchMedia("(display-mode: standalone)").matches) {
+    $("install-card").hidden = true;
+    return;
+  }
+  if (location.protocol === "https:") {
+    text.textContent =
+      "open your browser menu and choose “add to home screen” / “install app”.";
+    return;
+  }
+  const { httpsPort, address } = await fetch("/config.json").then((r) => r.json());
+  text.innerHTML =
+    "installing needs https. do this once:<br>1. download the certificate below.<br>" +
+    "2. android: settings → security → encryption &amp; credentials → install a certificate → ca certificate. " +
+    "iphone: install the profile, then settings → general → about → certificate trust settings → turn it on.<br>" +
+    "3. open the secure version and install from the browser menu.";
+  const download = document.createElement("a");
+  download.href = "/ca.crt";
+  download.innerHTML = "<button style='width:100%'>1. download certificate</button>";
+  const secure = document.createElement("a");
+  secure.href = `https://${address}:${httpsPort}/?t=${encodeURIComponent(token ?? "")}`;
+  secure.innerHTML = "<button class='primary' style='width:100%'>3. open secure version</button>";
+  actions.replaceChildren(download, secure);
+}
+renderInstall().catch(() => {});
+
+if ("serviceWorker" in navigator && window.isSecureContext) {
+  navigator.serviceWorker.register("/sw.js").catch(() => {});
+}
+
+/* -------------------------------------------------------------------------- */
+/* Input: touchpad and keyboard                                               */
+/* -------------------------------------------------------------------------- */
+
+const pad = $("pad");
+const touches = new Map();
+let gesture = null; // { fingers, startTime, moved, scrollCarry }
+let move = { dx: 0, dy: 0 };
+let moveFrame = null;
+
+// Moves are batched to one message per animation frame.
+function queueMove(dx, dy) {
+  move.dx += dx;
+  move.dy += dy;
+  if (moveFrame) return;
+  moveFrame = requestAnimationFrame(() => {
+    moveFrame = null;
+    if (move.dx || move.dy) send({ type: "pointer-move", dx: move.dx, dy: move.dy }, { buzz: false });
+    move = { dx: 0, dy: 0 };
+  });
+}
+
+// Pointer acceleration: slow drags are precise, fast flicks cross the desk.
+const accelerate = (delta) => delta * (1.4 + Math.min(Math.abs(delta) * 0.12, 2.6));
+
+pad.addEventListener("pointerdown", (event) => {
+  pad.setPointerCapture(event.pointerId);
+  touches.set(event.pointerId, { x: event.clientX, y: event.clientY });
+  if (!gesture) gesture = { fingers: 0, startTime: Date.now(), moved: 0, scrollCarry: 0 };
+  gesture.fingers = Math.max(gesture.fingers, touches.size);
+});
+
+pad.addEventListener("pointermove", (event) => {
+  const last = touches.get(event.pointerId);
+  if (!last || !gesture) return;
+  const dx = event.clientX - last.x;
+  const dy = event.clientY - last.y;
+  touches.set(event.pointerId, { x: event.clientX, y: event.clientY });
+  gesture.moved += Math.abs(dx) + Math.abs(dy);
+
+  if (touches.size >= 2) {
+    // Two fingers scroll. Only the first finger's movement counts, or both
+    // fingers would each scroll the page.
+    if (event.pointerId !== [...touches.keys()][0]) return;
+    gesture.scrollCarry += dy;
+    const notches = Math.trunc(gesture.scrollCarry / 28);
+    if (notches) {
+      gesture.scrollCarry -= notches * 28;
+      if (state?.input.clicks) send({ type: "pointer-scroll", dy: -notches }, { buzz: false });
+    }
+  } else {
+    queueMove(accelerate(dx), accelerate(dy));
+  }
+});
+
+function endTouch(event) {
+  touches.delete(event.pointerId);
+  if (touches.size > 0 || !gesture) return;
+  // A short touch that barely moved is a tap: one finger clicks, two
+  // right-click.
+  const tap = Date.now() - gesture.startTime < 250 && gesture.moved < 12;
+  if (tap && state?.input.clicks) {
+    send({ type: "pointer-click", button: gesture.fingers >= 2 ? "right" : "left" });
+  }
+  gesture = null;
+}
+pad.addEventListener("pointerup", endTouch);
+pad.addEventListener("pointercancel", endTouch);
+
+// Live typing: the field stays empty and each edit is forwarded as it
+// happens. beforeinput tells us what the phone keyboard meant (text,
+// backspace, enter) even when autocorrect rewrites words.
+const typing = $("typing");
+typing.addEventListener("beforeinput", (event) => {
+  event.preventDefault();
+  switch (event.inputType) {
+    case "insertText":
+    case "insertReplacementText":
+    case "insertFromPaste":
+      if (event.data) send({ type: "type", text: event.data }, { buzz: false });
+      break;
+    case "insertLineBreak":
+    case "insertParagraph":
+      send({ type: "key", key: "enter" }, { buzz: false });
+      break;
+    case "deleteContentBackward":
+    case "deleteWordBackward":
+      send({ type: "key", key: "backspace" }, { buzz: false });
+      break;
+  }
+});
+// Some Android keyboards skip beforeinput for composed text; catch it here.
+typing.addEventListener("input", () => {
+  if (typing.value) {
+    send({ type: "type", text: typing.value }, { buzz: false });
+    typing.value = "";
+  }
+});
+typing.addEventListener("keydown", (event) => {
+  if (event.key === "Enter") {
+    event.preventDefault();
+    send({ type: "key", key: "enter" }, { buzz: false });
+  }
+});
+
+connect();
