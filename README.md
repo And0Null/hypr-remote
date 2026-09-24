@@ -11,6 +11,8 @@ web page, installable as an app, with four tabs:
   files to `~/Downloads`, a live preview of any monitor, and system stats.
 - **input**: touchpad, live typing and a presentation clicker.
 
+![The four tabs: desk, control, bridge and input](docs/tabs.webp)
+
 ## Run
 
 ```bash
@@ -25,6 +27,8 @@ show it in your own bar or widget, the current code is always at
 `~/.cache/hypr-remote/pair.png` (and the link at `pair-url`). The phone stays
 paired across restarts. Delete `~/.config/hypr-remote/token` to unpair every
 phone.
+
+![Pairing: a phone remote tile with a QR code in a Quickshell control center, next to the phone's desk tab](docs/pairing.webp)
 
 Stop autostart: `systemctl --user disable --now hypr-remote ydotoold`.
 
@@ -45,6 +49,8 @@ bun run install-service   # adds a ydotoold user service
 
 The udev rule lets every member of the `input` group create virtual input
 devices, which means any program running as your user can inject keystrokes.
+
+![The bridge tab with a live screen preview and system stats, and the input tab with the touchpad and keyboard](docs/bridge-input.webp)
 
 ### Install as an app (HTTPS)
 
