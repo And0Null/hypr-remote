@@ -18,6 +18,11 @@ describe("Action", () => {
       { type: "lock" },
       { type: "window", op: "focus", address: "0x55d1c0a3b2e0" },
       { type: "window", op: "close", address: "0x1" },
+      { type: "window", op: "fullscreen", address: "0x1" },
+      { type: "window", op: "float", address: "0x1" },
+      { type: "window", op: "kill", address: "0x1" },
+      { type: "media-skip", by: -10 },
+      { type: "media-seek", to: 83.5 },
       { type: "window-move", address: "0xabc", workspace: 4 },
       { type: "scene", id: "movie" },
       { type: "sink", name: "alsa_output.pci-0000_00_1f.3.analog-stereo" },
@@ -44,6 +49,7 @@ describe("Action", () => {
     rejects({ type: "LOCK" });
     rejects({ type: "media", command: "stop" });
     rejects({ type: "radio", device: "wifi", on: "true" });
+    rejects({ type: "window", op: "move", address: "0x1" });
   });
 
   test("rejects keys outside the fixed table", () => {
@@ -75,6 +81,11 @@ describe("Action", () => {
     rejects({ type: "pointer-scroll", dy: 1.5 });
     rejects({ type: "type", text: "" });
     rejects({ type: "scene", id: "x".repeat(25) });
+    rejects({ type: "media-skip", by: 2.5 });
+    rejects({ type: "media-skip", by: 601 });
+    rejects({ type: "media-seek", to: -1 });
+    rejects({ type: "media-seek", to: Number.POSITIVE_INFINITY });
+    rejects({ type: "media-seek", by: 10 });
   });
 
   test("accepts workspaces past 10, up to 99", () => {

@@ -198,46 +198,31 @@ function render(next) {
 function renderDesk() {
   $("workspace").textContent = state.activeWorkspace ? pad2(state.activeWorkspace) : "--";
   $("window").textContent = state.activeWindow ?? "—";
-
-  const occupied = new Map(state.workspaces.map((w) => [w.id, w.windows]));
-  const grid = $("workspaces");
-  // Rebuilt only when a workspace past 10 comes or goes, or one is renamed.
-  const ids = workspaceIds();
-  const key = ids.map((id) => `${id}:${workspaceLabel(id)}`).join();
-  if (grid.dataset.key !== key) {
-    grid.dataset.key = key;
-    grid.replaceChildren(
-      ...ids.map((id) => {
-        const button = document.createElement("button");
-        button.className = "truncate";
-        button.textContent = workspaceLabel(id);
-        button.setAttribute("aria-label", `workspace ${workspaceName(id) ?? id}`);
-        button.dataset.action = JSON.stringify({ type: "workspace", id });
-        button.dataset.id = String(id);
-        return button;
-      }),
-    );
-  }
-  grid.querySelectorAll("button").forEach((button) => {
-    const id = Number(button.dataset.id);
-    button.dataset.active = String(id === state.activeWorkspace);
-    button.dataset.occupied = String((occupied.get(id) ?? 0) > 0);
-  });
-
+  renderTiles($("workspaces"), { actions: true });
   renderWindows();
-
-  const media = state.media;
-  $("media-status").textContent = media?.status ? `${media.status} · ${media.player}` : "nothing playing";
-  $("media-title").textContent = media?.title || "—";
-  $("media-artist").textContent = media?.artist || " ";
-  $("play-icon").innerHTML =
-    media?.status === "Playing" ? '<path d="M7 5h4v14H7zM13 5h4v14h-4z" />' : '<path d="M8 5v14l11-7z" />';
+  renderMedia();
 }
 
-/** 1–10 always, as on the number keys, then any workspace past them that exists. */
+/* -------------------------------------------------------------------------- */
+/* Desk: workspaces                                                           */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * The workspaces worth a tile: every one with windows or on a screen, then the
+ * lowest free number, to start a new one.
+ */
 function workspaceIds() {
-  const beyond = state.workspaces.map((w) => w.id).filter((id) => id > 10);
-  return [...Array.from({ length: 10 }, (_, index) => index + 1), ...beyond];
+  const ids = new Set(state.workspaces.filter((w) => w.windows > 0).map((w) => w.id));
+  for (const monitor of state.monitors) if (monitor.workspace > 0) ids.add(monitor.workspace);
+  if (state.activeWorkspace && state.activeWorkspace > 0) ids.add(state.activeWorkspace);
+  return [...ids, freeWorkspace(ids)].sort((a, b) => a - b);
+}
+
+/** @param {Set<number>} taken */
+function freeWorkspace(taken) {
+  let id = 1;
+  while (taken.has(id)) id++;
+  return id;
 }
 
 /**
@@ -250,119 +235,537 @@ function workspaceName(id) {
 }
 
 /** @param {number} id */
-const workspaceLabel = (id) => workspaceName(id) ?? (id === 10 ? "0" : String(id));
+const workspaceLabel = (id) => workspaceName(id) ?? String(id);
 
-// Rebuilt only when the set of windows changes, so a row mid-swipe isn't
-// replaced under the finger by a routine state update.
+/**
+ * What's on a workspace, as the app used there most recently. Windows arrive
+ * most recent first within each workspace.
+ * @param {number} id
+ */
+const workspaceApp = (id) => state.windows.find((w) => w.workspace === id)?.app ?? "";
+
+/**
+ * Fills a grid of workspace tiles: the one on the desk, or the drop strip
+ * shown while a window is dragged. Tiles with `actions` switch on tap.
+ * @param {HTMLElement} grid
+ * @param {{ actions: boolean }} options
+ */
+function renderTiles(grid, { actions }) {
+  const ids = workspaceIds();
+  const occupied = new Set(state.workspaces.filter((w) => w.windows > 0).map((w) => w.id));
+  const elsewhere = new Set(state.monitors.filter((m) => !m.focused).map((m) => m.workspace));
+  /** @param {number} id */
+  const hint = (id) => workspaceApp(id) || (occupied.has(id) || elsewhere.has(id) ? "" : "new");
+
+  // Rebuilt only when the tiles themselves change, so one being held isn't
+  // replaced under the finger.
+  const key = ids.map((id) => `${id}:${workspaceLabel(id)}:${hint(id)}`).join();
+  if (grid.dataset.key !== key) {
+    grid.dataset.key = key;
+    grid.replaceChildren(
+      ...ids.map((id) => {
+        const button = document.createElement("button");
+        const label = document.createElement("span");
+        label.className = "num truncate";
+        label.textContent = workspaceLabel(id);
+        const app = document.createElement("span");
+        app.className = "app truncate";
+        app.textContent = hint(id);
+        button.append(label, app);
+        button.setAttribute("aria-label", `workspace ${workspaceName(id) ?? id}${hint(id) ? `, ${hint(id)}` : ""}`);
+        if (actions) button.dataset.action = JSON.stringify({ type: "workspace", id });
+        button.dataset.id = String(id);
+        button.dataset.drop = "true";
+        return button;
+      }),
+    );
+  }
+  grid.querySelectorAll("button").forEach((button) => {
+    const id = Number(button.dataset.id);
+    button.dataset.active = String(id === state.activeWorkspace);
+    button.dataset.occupied = String(occupied.has(id));
+    button.dataset.visible = String(elsewhere.has(id) && id !== state.activeWorkspace);
+  });
+}
+
+/**
+ * Swipe across the card for the next or previous workspace with windows; hold
+ * a tile to send the focused window there.
+ */
+function wireWorkspaceCard() {
+  const card = $("workspaces-card");
+  /** @type {{ x: number; y: number } | null} */
+  let start = null;
+  /** @type {ReturnType<typeof setTimeout> | undefined} */
+  let holdTimer;
+  // A swipe or hold that ends on a tile mustn't also count as a tap on it.
+  let swallowClick = false;
+
+  card.addEventListener("pointerdown", (event) => {
+    swallowClick = false;
+    start = { x: event.clientX, y: event.clientY };
+    clearTimeout(holdTimer);
+    /** @type {HTMLElement | null} */
+    const tile = /** @type {Element} */ (event.target).closest("#workspaces button");
+    if (!tile) return;
+    holdTimer = setTimeout(() => {
+      start = null;
+      swallowClick = true;
+      tile.dataset.holding = "true";
+      setTimeout(() => (tile.dataset.holding = "false"), 250);
+      moveFocusedTo(Number(tile.dataset.id));
+    }, 500);
+  });
+
+  card.addEventListener("pointermove", (event) => {
+    if (start && Math.hypot(event.clientX - start.x, event.clientY - start.y) > 10) clearTimeout(holdTimer);
+  });
+
+  card.addEventListener("pointerup", (event) => {
+    clearTimeout(holdTimer);
+    if (!start) return;
+    const dx = event.clientX - start.x;
+    const dy = event.clientY - start.y;
+    start = null;
+    if (Math.abs(dx) > 40 && Math.abs(dx) > Math.abs(dy) * 1.5) {
+      swallowClick = true;
+      stepWorkspace(dx < 0 ? 1 : -1);
+    }
+  });
+
+  card.addEventListener("pointercancel", () => {
+    clearTimeout(holdTimer);
+    start = null;
+  });
+
+  card.addEventListener(
+    "click",
+    (event) => {
+      if (!swallowClick) return;
+      swallowClick = false;
+      event.stopPropagation();
+    },
+    true,
+  );
+  card.addEventListener("contextmenu", (event) => event.preventDefault());
+}
+wireWorkspaceCard();
+
+/** @param {1 | -1} direction */
+function stepWorkspace(direction) {
+  const current = state?.activeWorkspace;
+  if (!current) return;
+  const occupied = state.workspaces.filter((w) => w.windows > 0).map((w) => w.id);
+  const next = direction > 0 ? occupied.find((id) => id > current) : occupied.findLast((id) => id < current);
+  if (next) send({ type: "workspace", id: next });
+  else navigator.vibrate?.([10, 60, 10]);
+}
+
+/** @param {number} id */
+function moveFocusedTo(id) {
+  const focused = state?.windows.find((w) => w.focused);
+  if (!focused) return toast("no window is focused");
+  if (focused.workspace === id) return toast(`${focused.app || "it"} is already on ${workspaceLabel(id)}`);
+  send({ type: "window-move", address: focused.address, workspace: id });
+  toast(`moved ${focused.app || "window"} to ${workspaceLabel(id)}`);
+}
+
+/* -------------------------------------------------------------------------- */
+/* Desk: windows                                                              */
+/* -------------------------------------------------------------------------- */
+
+// Enough for most desks, and short enough to keep media in reach.
+const WINDOW_CAP = 6;
+
+// The list is rebuilt only when what it shows changes, and never while a
+// finger is on a row: it'd be replaced mid-swipe or mid-drag.
 let windowsKey = "";
-/** @type {string | null} */
-let movingAddress = null;
+let touchingWindow = false;
+let showAllWindows = false;
+/** The row swiped open to show close. @type {string | null} */
+let revealedAddress = null;
+/** The row held open to show its menu. @type {string | null} */
+let menuAddress = null;
+
+/** @param {State["windows"]} windows */
+function shownWindows(windows) {
+  if (showAllWindows || windows.length <= WINDOW_CAP) return windows;
+  const shown = windows.slice(0, WINDOW_CAP);
+  // The focused window always makes the cut. Windows are in workspace order,
+  // so one past the cut belongs at the end.
+  const focused = windows.find((w) => w.focused);
+  if (focused && !shown.includes(focused)) shown[WINDOW_CAP - 1] = focused;
+  return shown;
+}
 
 function renderWindows() {
   const windows = state.windows;
   $("window-count").textContent = String(windows.length);
-  const key = JSON.stringify(windows.map((w) => [w.address, w.title, w.workspace, w.focused])) + movingAddress;
+  if (touchingWindow) return;
+
+  const shown = shownWindows(windows);
+  const key = JSON.stringify([
+    shown.map((w) => [w.address, w.title, w.app, w.workspace, w.focused, w.fullscreen, w.floating]),
+    windows.length,
+    revealedAddress,
+    menuAddress,
+  ]);
   if (key === windowsKey) return;
   windowsKey = key;
 
-  const list = $("windows");
-  list.replaceChildren(
-    ...windows.map((win) => {
+  const more = /** @type {HTMLButtonElement} */ ($("windows-more"));
+  more.hidden = windows.length <= WINDOW_CAP;
+  more.textContent = showAllWindows ? "show less" : `show ${windows.length - shown.length} more`;
+
+  $("windows").replaceChildren(
+    ...shown.map((win) => {
+      const item = document.createElement("div");
       const row = document.createElement("div");
       row.className = "window";
       row.dataset.focused = String(win.focused);
       row.innerHTML = `
-        <span class="close-label">close</span>
+        <button class="close">close</button>
         <div class="window-body">
-          <span class="ws">${win.workspace}</span>
+          <span class="ws"></span>
           <div style="min-width: 0">
             <p class="app truncate" style="margin: 0"></p>
             <p class="title truncate" style="margin: 0"></p>
           </div>
-          <button class="move">move</button>
         </div>`;
+      const body = /** @type {HTMLElement} */ (row.querySelector(".window-body"));
+      const close = /** @type {HTMLElement} */ (row.querySelector(".close"));
       // textContent, not innerHTML: window titles are arbitrary text.
-      /** @type {HTMLElement} */ (row.querySelector(".app")).textContent = win.app;
+      /** @type {HTMLElement} */ (row.querySelector(".ws")).textContent = String(win.workspace);
+      /** @type {HTMLElement} */ (row.querySelector(".app")).textContent =
+        win.app + (win.fullscreen ? " · fullscreen" : win.floating ? " · floating" : "");
       /** @type {HTMLElement} */ (row.querySelector(".title")).textContent = win.title;
-      /** @type {HTMLElement} */ (row.querySelector(".move")).addEventListener("click", (event) => {
-        event.stopPropagation();
-        movingAddress = movingAddress === win.address ? null : win.address;
-        renderWindows();
+      close.setAttribute("aria-label", `close ${win.app || win.title}`);
+      close.addEventListener("click", () => {
+        send({ type: "window", op: "close", address: win.address });
+        revealedAddress = null;
       });
-
-      if (movingAddress === win.address) {
-        const picker = document.createElement("div");
-        picker.className = "move-picker";
-        for (const id of workspaceIds()) {
-          const button = document.createElement("button");
-          button.className = "truncate";
-          button.textContent = workspaceLabel(id);
-          button.disabled = id === win.workspace;
-          button.addEventListener("click", () => {
-            send({ type: "window-move", address: win.address, workspace: id });
-            movingAddress = null;
-          });
-          picker.append(button);
-        }
-        row.append(picker);
+      if (revealedAddress === win.address) {
+        row.dataset.open = "true";
+        body.style.transform = "translateX(-5.5rem)";
       }
+      body.addEventListener("contextmenu", (event) => event.preventDefault());
 
-      attachSwipe(row, win);
-      return row;
+      item.append(row);
+      if (menuAddress === win.address) item.append(windowMenu(win));
+      attachWindowGestures(row, body, win);
+      return item;
     }),
   );
 }
 
+$("windows-more").addEventListener("click", () => {
+  showAllWindows = !showAllWindows;
+  renderWindows();
+});
+
+/** @param {State["windows"][number]} win */
+function windowMenu(win) {
+  const menu = document.createElement("div");
+  menu.className = "window-menu";
+  /** @type {[string, "fullscreen" | "float" | "kill"][]} */
+  const items = [
+    [win.fullscreen ? "exit fullscreen" : "fullscreen", "fullscreen"],
+    [win.floating ? "tile" : "float", "float"],
+    ["force kill", "kill"],
+  ];
+  for (const [label, op] of items) {
+    const button = document.createElement("button");
+    button.textContent = label;
+    /** @type {ReturnType<typeof setTimeout> | undefined} */
+    let disarm;
+    button.addEventListener("click", () => {
+      // Killing loses unsaved work, so it takes a second tap.
+      if (op === "kill" && button.dataset.armed !== "true") {
+        button.dataset.armed = "true";
+        button.textContent = "tap again";
+        disarm = setTimeout(() => {
+          button.dataset.armed = "false";
+          button.textContent = label;
+        }, 3000);
+        return;
+      }
+      clearTimeout(disarm);
+      send({ type: "window", op, address: win.address });
+      menuAddress = null;
+      renderWindows();
+    });
+    menu.append(button);
+  }
+  return menu;
+}
+
 /**
- * Swipe left past a third of the row to close it; a tap focuses it.
+ * One row's gestures: tap to focus; swipe left to reveal close, or all the way
+ * to close at once; hold, then drag onto a workspace or let go for the menu.
  * @param {HTMLElement} row
+ * @param {HTMLElement} body
  * @param {State["windows"][number]} win
  */
-function attachSwipe(row, win) {
-  const body = /** @type {HTMLElement} */ (row.querySelector(".window-body"));
-  /** @type {number | null} */
-  let startX = null;
-  let startY = 0;
+function attachWindowGestures(row, body, win) {
+  /** @type {{ x: number; y: number } | null} */
+  let start = null;
+  /** @type {"press" | "swipe" | "scroll" | "held" | "drag"} */
+  let mode = "press";
   let dx = 0;
-  let swiping = false;
+  /** @type {ReturnType<typeof setTimeout> | undefined} */
+  let holdTimer;
+  const revealWidth = () => /** @type {HTMLElement} */ (row.querySelector(".close")).offsetWidth;
+  const offset = () => (revealedAddress === win.address ? -revealWidth() : 0);
 
   body.addEventListener("pointerdown", (event) => {
-    if (/** @type {Element} */ (event.target).closest("button")) return;
-    startX = event.clientX;
-    startY = event.clientY;
-    dx = 0;
-    swiping = false;
+    if (event.button !== 0) return;
+    start = { x: event.clientX, y: event.clientY };
+    mode = "press";
+    dx = offset();
+    touchingWindow = true;
     body.setPointerCapture(event.pointerId);
+    holdTimer = setTimeout(() => {
+      mode = "held";
+      body.dataset.held = "true";
+      navigator.vibrate?.(15);
+    }, 450);
   });
 
   body.addEventListener("pointermove", (event) => {
-    if (startX === null) return;
-    dx = Math.min(0, event.clientX - startX);
-    if (!swiping && Math.abs(dx) > 10 && Math.abs(dx) > Math.abs(event.clientY - startY)) swiping = true;
-    if (swiping) {
-      body.dataset.dragging = "true";
+    if (!start) return;
+    const mx = event.clientX - start.x;
+    const my = event.clientY - start.y;
+    if (mode === "press" && Math.hypot(mx, my) > 10) {
+      clearTimeout(holdTimer);
+      mode = Math.abs(mx) > Math.abs(my) ? "swipe" : "scroll";
+      if (mode === "swipe") {
+        body.dataset.dragging = "true";
+        row.dataset.open = "true";
+      }
+    }
+    if (mode === "swipe") {
+      dx = Math.min(0, offset() + mx);
       body.style.transform = `translateX(${dx}px)`;
     }
+    if (mode === "held" && Math.hypot(mx, my) > 10) {
+      mode = "drag";
+      body.dataset.held = "false";
+      startDrag(win, body);
+    }
+    if (mode === "drag") moveDrag(event.clientX, event.clientY);
   });
 
-  const end = () => {
-    if (startX === null) return;
+  // Once held, the finger drags the window, not the page.
+  body.addEventListener(
+    "touchmove",
+    (event) => {
+      if (mode === "held" || mode === "drag") event.preventDefault();
+    },
+    { passive: false },
+  );
+
+  /** @param {boolean} cancelled */
+  const end = (cancelled) => {
+    clearTimeout(holdTimer);
+    if (!start) return;
+    start = null;
+    touchingWindow = false;
+    body.dataset.held = "false";
     body.dataset.dragging = "false";
-    if (swiping && -dx > row.clientWidth / 3) {
-      body.style.transform = "translateX(-100%)";
-      send({ type: "window", op: "close", address: win.address });
-    } else {
-      body.style.transform = "";
-      if (!swiping) send({ type: "window", op: "focus", address: win.address });
+
+    if (cancelled) {
+      endDrag(false);
+      body.style.transform = offset() ? `translateX(${offset()}px)` : "";
+      row.dataset.open = String(Boolean(offset()));
+    } else if (mode === "press") {
+      // A tap on an open row, or while another is open, just closes it.
+      if (revealedAddress) revealedAddress = null;
+      else send({ type: "window", op: "focus", address: win.address });
+      menuAddress = null;
+    } else if (mode === "swipe") {
+      if (-dx > row.clientWidth * 0.6) {
+        body.style.transform = "translateX(-100%)";
+        send({ type: "window", op: "close", address: win.address });
+        revealedAddress = null;
+      } else if (-dx > revealWidth() / 2) {
+        body.style.transform = `translateX(-${revealWidth()}px)`;
+        revealedAddress = win.address;
+      } else {
+        body.style.transform = "";
+        if (revealedAddress === win.address) revealedAddress = null;
+        body.addEventListener("transitionend", () => (row.dataset.open = "false"), { once: true });
+      }
+    } else if (mode === "held") {
+      menuAddress = menuAddress === win.address ? null : win.address;
+    } else if (mode === "drag") {
+      endDrag(true);
     }
-    startX = null;
+    mode = "press";
+    // Catch up on anything that arrived while the finger was down.
+    renderWindows();
   };
-  body.addEventListener("pointerup", end);
-  body.addEventListener("pointercancel", () => {
-    body.dataset.dragging = "false";
-    body.style.transform = "";
-    startX = null;
+  body.addEventListener("pointerup", () => end(false));
+  body.addEventListener("pointercancel", () => end(true));
+}
+
+/**
+ * The window being dragged, its stand-in under the finger, and the tile it's
+ * over.
+ * @type {{ win: State["windows"][number]; body: HTMLElement; ghost: HTMLElement; target: HTMLElement | null } | null}
+ */
+let drag = null;
+
+/**
+ * @param {State["windows"][number]} win
+ * @param {HTMLElement} body
+ */
+function startDrag(win, body) {
+  const ghost = document.createElement("div");
+  ghost.className = "ghost truncate";
+  ghost.textContent = win.app || win.title;
+  document.body.append(ghost);
+  body.dataset.lifted = "true";
+  // Tiles pinned to the top, reachable however far down the list is.
+  renderTiles($("drop-targets"), { actions: false });
+  $("drop-strip").hidden = false;
+  drag = { win, body, ghost, target: null };
+  navigator.vibrate?.(8);
+}
+
+/**
+ * @param {number} x
+ * @param {number} y
+ */
+function moveDrag(x, y) {
+  if (!drag) return;
+  drag.ghost.style.left = `${x}px`;
+  drag.ghost.style.top = `${y}px`;
+  /** @type {HTMLElement | null} */
+  const tile = document.elementFromPoint(x, y)?.closest("[data-drop]") ?? null;
+  if (tile === drag.target) return;
+  if (drag.target) drag.target.dataset.target = "false";
+  drag.target = tile;
+  if (tile) {
+    tile.dataset.target = "true";
+    navigator.vibrate?.(5);
+  }
+}
+
+/** @param {boolean} drop */
+function endDrag(drop) {
+  if (!drag) return;
+  const { win, body, ghost, target } = drag;
+  drag = null;
+  ghost.remove();
+  body.dataset.lifted = "false";
+  if (target) target.dataset.target = "false";
+  $("drop-strip").hidden = true;
+  if (!drop || !target) return;
+  const id = Number(target.dataset.id);
+  if (id === win.workspace) return;
+  send({ type: "window-move", address: win.address, workspace: id });
+  toast(`moved ${win.app || "window"} to ${workspaceLabel(id)}`);
+}
+
+/* -------------------------------------------------------------------------- */
+/* Desk: media                                                                */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * Where the track was when the laptop last said, and when that was: the bar
+ * counts on from there on its own, rather than asking every second.
+ */
+let mediaClock = { position: 0, at: 0, playing: false };
+
+/** @param {number} total */
+function clockTime(total) {
+  const s = Math.max(0, Math.floor(total));
+  const hours = Math.floor(s / 3600);
+  const minutes = Math.floor((s % 3600) / 60);
+  return hours ? `${hours}:${pad2(minutes)}:${pad2(s % 60)}` : `${minutes}:${pad2(s % 60)}`;
+}
+
+function renderMedia() {
+  const media = state.media;
+  $("media-status").textContent = media?.status ? `${media.status} · ${media.player}` : "nothing playing";
+  $("media-title").textContent = media?.title || "—";
+  $("media-artist").textContent = media?.artist || " ";
+  $("play-icon").innerHTML =
+    media?.status === "Playing" ? '<path d="M7 5h4v14H7zM13 5h4v14h-4z" />' : '<path d="M8 5v14l11-7z" />';
+
+  mediaClock = { position: media?.position ?? 0, at: performance.now(), playing: media?.status === "Playing" };
+  const seek = /** @type {HTMLInputElement} */ ($("media-seek"));
+  const length = media?.length ?? null;
+  seek.disabled = !length || media?.position == null;
+  seek.max = String(Math.max(1, Math.round(length ?? 1)));
+  $("media-length").textContent = length ? clockTime(length) : "--:--";
+  tickMedia();
+
+  $("media-volume-level").textContent = state.volume ? String(state.volume.level) : "--";
+  setSlider("media-volume", state.volume?.level);
+  loadArt(media?.art ?? null);
+}
+
+function tickMedia() {
+  const media = state?.media;
+  if (dragging.has("media-seek")) return;
+  if (media?.position == null) {
+    $("media-elapsed").textContent = "--:--";
+    setSlider("media-seek", 0);
+    return;
+  }
+  const running = mediaClock.playing ? (performance.now() - mediaClock.at) / 1000 : 0;
+  const elapsed = Math.min(media.length ?? Infinity, mediaClock.position + running);
+  $("media-elapsed").textContent = clockTime(elapsed);
+  setSlider("media-seek", Math.round(elapsed));
+}
+setInterval(() => {
+  if (state && document.visibilityState === "visible" && $("tab-desk").dataset.active === "true") tickMedia();
+}, 500);
+
+// Seeking waits for the finger to lift: one jump, not one per pixel.
+{
+  const seek = /** @type {HTMLInputElement} */ ($("media-seek"));
+  seek.addEventListener("pointerdown", () => dragging.add("media-seek"));
+  seek.addEventListener("pointercancel", () => dragging.delete("media-seek"));
+  seek.addEventListener("input", () => {
+    seek.style.setProperty("--fill", `${(Number(seek.value) / Number(seek.max)) * 100}%`);
+    $("media-elapsed").textContent = clockTime(Number(seek.value));
   });
+  seek.addEventListener("change", () => {
+    send({ type: "media-seek", to: Number(seek.value) }, { buzz: false });
+    mediaClock = { ...mediaClock, position: Number(seek.value), at: performance.now() };
+    dragging.delete("media-seek");
+  });
+}
+
+// Album art comes over HTTP with the token in a header, like screen frames.
+/** @type {string | null} */
+let artKey = null;
+/** @type {string | null} */
+let artUrl = null;
+
+/** @param {string | null} key */
+function loadArt(key) {
+  if (key === artKey) return;
+  artKey = key;
+  const image = /** @type {HTMLImageElement} */ ($("media-art"));
+  /** @param {string | null} url */
+  const show = (url) => {
+    if (artUrl) URL.revokeObjectURL(artUrl);
+    artUrl = url;
+    image.hidden = !url;
+    if (url) image.src = url;
+    else image.removeAttribute("src");
+  };
+  if (!key) return show(null);
+  fetch(`/art?k=${encodeURIComponent(key)}`, { headers: { "x-token": token ?? "" } })
+    .then((response) => {
+      if (!response.ok) throw new Error(`art: ${response.status}`);
+      return response.blob();
+    })
+    .then((blob) => artKey === key && show(URL.createObjectURL(blob)))
+    .catch(() => artKey === key && show(null));
 }
 
 function renderControl() {
@@ -550,6 +953,7 @@ function wireSlider(id, toAction) {
   });
 }
 wireSlider("volume-slider", (level) => ({ type: "volume-set", level }));
+wireSlider("media-volume", (level) => ({ type: "volume-set", level }));
 wireSlider("brightness-slider", (level) => ({ type: "brightness-set", level }));
 
 $("dnd").addEventListener("click", () => send({ type: "notifications", op: "toggle-dnd" }));

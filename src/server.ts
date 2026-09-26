@@ -4,6 +4,7 @@ import type { Server, ServerWebSocket } from "bun";
 
 import { Action, runAction, type Reply } from "./actions";
 import { hyprSocket, prepareEnvironment } from "./env";
+import { readArt } from "./features/media";
 import { captureMonitor } from "./features/screen";
 import { saveUpload } from "./features/send";
 import { lanAddress, loadToken, publishPairing, tokenMatches } from "./pairing";
@@ -165,7 +166,7 @@ function authorised(request: Request, url?: URL) {
 // Set once HTTPS is up. From then on the token, and with it typing on this
 // laptop, never crosses plain HTTP, where anyone on the Wi-Fi can read it.
 let httpsRunning = false;
-const PAIRED_PATHS = new Set(["/ws", "/screen", "/upload"]);
+const PAIRED_PATHS = new Set(["/ws", "/screen", "/upload", "/art"]);
 
 async function handle(request: Request, server: Server<undefined>): Promise<Response | undefined> {
   const url = new URL(request.url);
@@ -190,6 +191,15 @@ async function handle(request: Request, server: Server<undefined>): Promise<Resp
     return image
       ? new Response(image, { headers: { "Content-Type": "image/jpeg", "Cache-Control": "no-store" } })
       : new Response("No such monitor", { status: 404 });
+  }
+
+  // The playing track's album art, by the key in the state it came with.
+  if (url.pathname === "/art") {
+    if (!authorised(request)) return new Response("Not paired", { status: 401 });
+    const art = await readArt(url.searchParams.get("k") ?? "");
+    return art
+      ? new Response(art.bytes, { headers: { "Content-Type": art.type, "Cache-Control": "private, max-age=3600" } })
+      : new Response("No art", { status: 404 });
   }
 
   // Files from the phone land in ~/Downloads. One file per request, as the raw

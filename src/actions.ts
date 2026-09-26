@@ -2,9 +2,9 @@ import { z } from "zod";
 
 import { changeVolume, setSink, setVolume, toggleMute } from "./features/audio";
 import { CLIPBOARD_LIMIT, getClipboard, setClipboard } from "./features/clipboard";
-import { switchWorkspace, windowCommand } from "./features/desktop";
+import { moveWindow, switchWorkspace, windowCommand } from "./features/desktop";
 import { click, KEYS, movePointer, pressKey, scroll, TEXT_LIMIT, typeText, type KeyName } from "./features/input";
-import { mediaCommand } from "./features/media";
+import { mediaCommand, seekMedia } from "./features/media";
 import { openLink } from "./features/send";
 import {
   changeBrightness,
@@ -30,6 +30,9 @@ const address = z.string().regex(/^0x[0-9a-f]{1,16}$/);
 
 export const Action = z.discriminatedUnion("type", [
   z.strictObject({ type: z.literal("media"), command: z.enum(["play-pause", "next", "previous"]) }),
+  // Relative skips (-10, +10) or a jump to a point in the track, in seconds.
+  z.strictObject({ type: z.literal("media-skip"), by: z.number().int().min(-600).max(600) }),
+  z.strictObject({ type: z.literal("media-seek"), to: z.number().finite().min(0).max(86_400) }),
   z.strictObject({ type: z.literal("volume"), command: z.enum(["up", "down", "mute"]) }),
   z.strictObject({ type: z.literal("volume-set"), level: z.number().int().min(0).max(100) }),
   z.strictObject({ type: z.literal("brightness"), command: z.enum(["up", "down"]) }),
@@ -37,7 +40,11 @@ export const Action = z.discriminatedUnion("type", [
   z.strictObject({ type: z.literal("workspace"), id: workspaceId }),
   z.strictObject({ type: z.literal("lock") }),
 
-  z.strictObject({ type: z.literal("window"), op: z.enum(["focus", "close"]), address }),
+  z.strictObject({
+    type: z.literal("window"),
+    op: z.enum(["focus", "close", "fullscreen", "float", "kill"]),
+    address,
+  }),
   z.strictObject({ type: z.literal("window-move"), address, workspace: workspaceId }),
   z.strictObject({ type: z.literal("scene"), id: z.string().max(24) }),
   // The default audio output.
@@ -82,6 +89,12 @@ export async function runAction(
     case "media":
       await mediaCommand(action.command);
       break;
+    case "media-skip":
+      await seekMedia({ by: action.by });
+      break;
+    case "media-seek":
+      await seekMedia({ to: action.to });
+      break;
     case "volume":
       await (action.command === "mute" ? toggleMute() : changeVolume(action.command));
       break;
@@ -104,7 +117,7 @@ export async function runAction(
       await windowCommand(action.op, action.address);
       break;
     case "window-move":
-      await windowCommand("move", action.address, action.workspace);
+      await moveWindow(action.address, action.workspace);
       break;
     case "scene": {
       const scene = scenes.find((candidate) => candidate.id === action.id);

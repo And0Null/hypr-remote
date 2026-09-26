@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 
-import { toSnapshot } from "../src/features/desktop";
+import { appName, toSnapshot } from "../src/features/desktop";
 import type { Client, Monitor } from "../src/hypr";
 
 const client = (address: string, workspace: number, focusHistoryID: number, title = address): Client => ({
@@ -47,9 +47,9 @@ describe("toSnapshot", () => {
       activeWorkspace: 2,
       activeWindow: "browser",
       windows: [
-        { address: "0x1", title: "0x1", app: "kitty", workspace: 1, focused: false },
-        { address: "0x2", title: "0x2", app: "kitty", workspace: 1, focused: false },
-        { address: "0x3", title: "browser", app: "kitty", workspace: 2, focused: true },
+        { address: "0x1", title: "0x1", app: "kitty", workspace: 1, focused: false, fullscreen: false, floating: false },
+        { address: "0x2", title: "0x2", app: "kitty", workspace: 1, focused: false, fullscreen: false, floating: false },
+        { address: "0x3", title: "browser", app: "kitty", workspace: 2, focused: true, fullscreen: false, floating: false },
       ],
       monitors: [{ name: "eDP-1", focused: true, workspace: 2 }],
     });
@@ -83,5 +83,33 @@ describe("toSnapshot", () => {
       windows: [],
       monitors: [],
     });
+  });
+});
+
+describe("appName", () => {
+  test("keeps plain classes, lowercased", () => {
+    expect(appName("kitty")).toBe("kitty");
+    expect(appName("Code")).toBe("code");
+    expect(appName("jetbrains-idea")).toBe("jetbrains-idea");
+  });
+
+  test("takes the last part of reverse-DNS classes", () => {
+    expect(appName("org.gnome.Nautilus")).toBe("nautilus");
+    expect(appName("com.mitchellh.ghostty")).toBe("ghostty");
+  });
+
+  test("skips generic last parts", () => {
+    expect(appName("org.telegram.desktop")).toBe("telegram");
+    expect(appName("com.example.App")).toBe("example");
+  });
+
+  test("spells underscores as spaces", () => {
+    expect(appName("com.github.th_ch.youtube_music")).toBe("youtube music");
+  });
+
+  test("copes with empty and odd classes", () => {
+    expect(appName("")).toBe("");
+    expect(appName(".")).toBe("");
+    expect(appName("desktop")).toBe("desktop");
   });
 });

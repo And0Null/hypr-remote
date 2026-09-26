@@ -3,8 +3,10 @@
 Control a Hyprland desktop from your phone over home Wi-Fi. The phone gets a
 web page, installable as an app, with four tabs:
 
-- **desk**: workspaces, the window list (tap to focus, swipe left to close,
-  move to another workspace) and media.
+- **desk**: workspaces in use, each with the app on it (swipe to switch, hold
+  one to move the focused window there); the window list (tap to focus, swipe
+  left to close, hold to drag onto a workspace or for fullscreen, float and
+  force kill); and media with album art, seeking and volume.
 - **control**: scenes, volume and sound output, brightness, do not disturb and
   clearing notifications, Wi-Fi and Bluetooth, and hold-to-lock.
 - **bridge**: shared clipboard in both directions, opening links, sending

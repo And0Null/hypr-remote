@@ -6,6 +6,8 @@ export type Window = {
   app: string;
   workspace: number;
   focused: boolean;
+  fullscreen: boolean;
+  floating: boolean;
 };
 
 /** `name` is the id as text unless the workspace was given a name in Hyprland. */
@@ -43,9 +45,11 @@ export function toSnapshot(
     .map((client) => ({
       address: client.address,
       title: client.title,
-      app: client.class,
+      app: appName(client.class),
       workspace: client.workspace.id,
       focused: client.focusHistoryID === 0,
+      fullscreen: client.fullscreen > 0,
+      floating: client.floating,
     }));
 
   return {
@@ -64,6 +68,19 @@ export function toSnapshot(
   };
 }
 
+// Last segments of reverse-DNS classes that say nothing about the app.
+const GENERIC = new Set(["desktop", "app", "application", "client", "bin"]);
+
+/**
+ * A window class as a person would say it: `org.gnome.Nautilus` is nautilus,
+ * `org.telegram.desktop` is telegram, `youtube_music` is youtube music.
+ */
+export function appName(windowClass: string): string {
+  const parts = windowClass.toLowerCase().split(".").filter(Boolean);
+  while (parts.length > 1 && GENERIC.has(parts.at(-1)!)) parts.pop();
+  return (parts.at(-1) ?? "").replaceAll("_", " ");
+}
+
 /**
  * With `binds:workspace_back_and_forth` on, switching to the workspace you're
  * already on jumps back to the previous one — from a remote, that reads as the
@@ -75,15 +92,33 @@ export async function switchWorkspace(id: number) {
   await dispatch(`workspace ${id}`);
 }
 
+export type WindowOp = "focus" | "close" | "fullscreen" | "float" | "kill";
+
 /** Addresses are validated as 0x-hex by the action schema before arriving here. */
-export async function windowCommand(
-  op: "focus" | "close" | "move",
-  address: string,
-  workspace?: number,
-) {
-  if (op === "focus") await dispatch(`focuswindow address:${address}`);
-  if (op === "close") await dispatch(`closewindow address:${address}`);
-  if (op === "move" && workspace) {
-    await dispatch(`movetoworkspacesilent ${workspace},address:${address}`);
+export async function windowCommand(op: WindowOp, address: string) {
+  const target = `address:${address}`;
+  switch (op) {
+    case "focus":
+      await dispatch(`focuswindow ${target}`);
+      break;
+    // Asks politely, as the close button would: unsaved work gets a prompt.
+    case "close":
+      await dispatch(`closewindow ${target}`);
+      break;
+    // For frozen apps that ignore a polite close.
+    case "kill":
+      await dispatch(`killwindow ${target}`);
+      break;
+    case "float":
+      await dispatch(`togglefloating ${target}`);
+      break;
+    // Hyprland's fullscreen only takes the focused window, so focus it first.
+    case "fullscreen":
+      if (await dispatch(`focuswindow ${target}`)) await dispatch("fullscreen 0");
+      break;
   }
+}
+
+export async function moveWindow(address: string, workspace: number) {
+  await dispatch(`movetoworkspacesilent ${workspace},address:${address}`);
 }
