@@ -36,7 +36,8 @@ Stop autostart: `systemctl --user disable --now hypr-remote ydotoold`.
 
 Moving the pointer works out of the box, through Hyprland. Typing needs
 `wtype`; clicks and scrolling need `ydotool`, which writes to `/dev/uinput`.
-On Fedora, `scripts/setup-input.sh` does all of this. Elsewhere:
+`scripts/setup-input.sh` does all of this with dnf, pacman, apt or zypper.
+By hand:
 
 ```bash
 sudo pacman -S wtype ydotool          # Arch, CachyOS (Fedora: sudo dnf install wtype ydotool)
@@ -115,6 +116,8 @@ sudo firewall-cmd --permanent --add-port=4000/tcp --add-port=4443/tcp && sudo fi
   with zod. Commands run with a fixed argv and no shell. Window addresses,
   sound outputs and monitor names are checked against live lists.
 - `src/state.ts` reads the desktop. Window and workspace changes arrive live
-  from Hyprland's event socket; the rest is polled only while a phone is
-  connected.
-- `public/` is the phone page: plain HTML and JS, no build step.
+  from Hyprland's event socket, and volume, sound output and media from
+  `pactl subscribe` and `playerctl --follow` (`src/watch.ts`); the rest is
+  polled only while a phone is connected.
+- `public/` is the phone page: plain HTML and JS, no build step. Its font,
+  Geist (SIL OFL), is served from `public/fonts`.
