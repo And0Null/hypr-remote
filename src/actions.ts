@@ -29,40 +29,40 @@ const workspaceId = z.number().int().min(1).max(99);
 const address = z.string().regex(/^0x[0-9a-f]{1,16}$/);
 
 export const Action = z.discriminatedUnion("type", [
-  z.object({ type: z.literal("media"), command: z.enum(["play-pause", "next", "previous"]) }),
-  z.object({ type: z.literal("volume"), command: z.enum(["up", "down", "mute"]) }),
-  z.object({ type: z.literal("volume-set"), level: z.number().int().min(0).max(100) }),
-  z.object({ type: z.literal("brightness"), command: z.enum(["up", "down"]) }),
-  z.object({ type: z.literal("brightness-set"), level: z.number().int().min(5).max(100) }),
-  z.object({ type: z.literal("workspace"), id: workspaceId }),
-  z.object({ type: z.literal("lock") }),
+  z.strictObject({ type: z.literal("media"), command: z.enum(["play-pause", "next", "previous"]) }),
+  z.strictObject({ type: z.literal("volume"), command: z.enum(["up", "down", "mute"]) }),
+  z.strictObject({ type: z.literal("volume-set"), level: z.number().int().min(0).max(100) }),
+  z.strictObject({ type: z.literal("brightness"), command: z.enum(["up", "down"]) }),
+  z.strictObject({ type: z.literal("brightness-set"), level: z.number().int().min(5).max(100) }),
+  z.strictObject({ type: z.literal("workspace"), id: workspaceId }),
+  z.strictObject({ type: z.literal("lock") }),
 
-  z.object({ type: z.literal("window"), op: z.enum(["focus", "close"]), address }),
-  z.object({ type: z.literal("window-move"), address, workspace: workspaceId }),
-  z.object({ type: z.literal("scene"), id: z.string().max(24) }),
+  z.strictObject({ type: z.literal("window"), op: z.enum(["focus", "close"]), address }),
+  z.strictObject({ type: z.literal("window-move"), address, workspace: workspaceId }),
+  z.strictObject({ type: z.literal("scene"), id: z.string().max(24) }),
   // The default audio output.
-  z.object({ type: z.literal("sink"), name: z.string().max(256) }),
-  z.object({ type: z.literal("notifications"), op: z.enum(["toggle-dnd", "clear"]) }),
-  z.object({ type: z.literal("radio"), device: z.enum(["wifi", "bluetooth"]), on: z.boolean() }),
+  z.strictObject({ type: z.literal("sink"), name: z.string().max(256) }),
+  z.strictObject({ type: z.literal("notifications"), op: z.enum(["toggle-dnd", "clear"]) }),
+  z.strictObject({ type: z.literal("radio"), device: z.enum(["wifi", "bluetooth"]), on: z.boolean() }),
 
-  z.object({ type: z.literal("clipboard-set"), text: z.string().max(CLIPBOARD_LIMIT) }),
-  z.object({ type: z.literal("clipboard-get") }),
+  z.strictObject({ type: z.literal("clipboard-set"), text: z.string().max(CLIPBOARD_LIMIT) }),
+  z.strictObject({ type: z.literal("clipboard-get") }),
   // Links only; files go over HTTP (see /upload).
-  z.object({ type: z.literal("open-link"), url: z.string().max(4096) }),
+  z.strictObject({ type: z.literal("open-link"), url: z.string().max(4096) }),
 
-  z.object({ type: z.literal("type"), text: z.string().min(1).max(TEXT_LIMIT) }),
+  z.strictObject({ type: z.literal("type"), text: z.string().min(1).max(TEXT_LIMIT) }),
   // Named keys, which also drive slides (page-up/down, blank).
-  z.object({
+  z.strictObject({
     type: z.literal("key"),
     key: z.enum(Object.keys(KEYS) as [KeyName, ...KeyName[]]),
   }),
-  z.object({
+  z.strictObject({
     type: z.literal("pointer-move"),
     dx: z.number().finite().min(-2000).max(2000),
     dy: z.number().finite().min(-2000).max(2000),
   }),
-  z.object({ type: z.literal("pointer-click"), button: z.enum(["left", "right", "middle"]) }),
-  z.object({ type: z.literal("pointer-scroll"), dy: z.number().int().min(-20).max(20) }),
+  z.strictObject({ type: z.literal("pointer-click"), button: z.enum(["left", "right", "middle"]) }),
+  z.strictObject({ type: z.literal("pointer-scroll"), dy: z.number().int().min(-20).max(20) }),
 ]);
 
 export type Action = z.infer<typeof Action>;

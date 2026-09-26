@@ -52,9 +52,9 @@ describe("Action", () => {
     rejects({ type: "key", key: "toString" });
   });
 
-  test("drops fields it doesn't know rather than passing them on", () => {
-    const parsed = Action.parse({ type: "lock", command: "anything" });
-    expect(parsed).toEqual({ type: "lock" });
+  test("rejects fields it doesn't know", () => {
+    rejects({ type: "lock", command: "anything" });
+    rejects({ type: "volume-set", level: 50, extra: true });
   });
 
   test("rejects window addresses that aren't 0x-hex", () => {
