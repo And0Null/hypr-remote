@@ -54,14 +54,28 @@ function broadcast(force = false) {
   for (const client of clients) client.send(message);
 }
 
+// Reads overlap (timers, events, actions) and an older one can finish last.
+// Each read is numbered as it starts, and its result is kept only if no newer
+// read of the same kind has landed, so stale state never replaces fresh.
+const started = { fast: 0, slow: 0 };
+const landed = { fast: 0, slow: 0 };
+
 async function refresh(which: "fast" | "slow" | "both") {
   if (clients.size === 0) return;
+  const fastRead = which !== "slow" ? ++started.fast : 0;
+  const slowRead = which !== "fast" ? ++started.slow : 0;
   const [nextFast, nextSlow] = await Promise.all([
-    which !== "slow" ? readFast() : fast,
-    which !== "fast" ? readSlow() : slow,
+    fastRead ? readFast() : null,
+    slowRead ? readSlow() : null,
   ]);
-  fast = nextFast;
-  slow = nextSlow;
+  if (nextFast && fastRead > landed.fast) {
+    fast = nextFast;
+    landed.fast = fastRead;
+  }
+  if (nextSlow && slowRead > landed.slow) {
+    slow = nextSlow;
+    landed.slow = slowRead;
+  }
   broadcast();
 }
 
@@ -74,7 +88,12 @@ function scheduleRefresh() {
 
 /** Workspace and window changes arrive from Hyprland the instant they happen. */
 async function followHyprland() {
+  // One failure can fire both close and error; each would schedule its own
+  // reconnect, doubling the connections every time Hyprland restarts.
+  let retried = false;
   const retry = () => {
+    if (retried) return;
+    retried = true;
     // A restarted Hyprland has a new signature, so look it up again.
     prepareEnvironment();
     setTimeout(followHyprland, 2000);

@@ -388,24 +388,40 @@ function renderInput() {
 // data-action sends its JSON; data-key presses a named key. Either can carry
 // data-repeat to keep firing while held (volume, arrows, backspace).
 let repeatTimer = null;
+let repeated = false;
 function stopRepeat() {
   clearTimeout(repeatTimer);
   clearInterval(repeatTimer);
   repeatTimer = null;
 }
 
-document.addEventListener("pointerdown", (event) => {
+const actionOf = (button) =>
+  button.dataset.action ? JSON.parse(button.dataset.action) : { type: "key", key: button.dataset.key };
+
+// Click, not pointerdown: the browser withholds it when a touch turns into a
+// scroll, and keyboards and switch access produce it too.
+document.addEventListener("click", (event) => {
   const button = event.target.closest("[data-action], [data-key]");
   if (!button || button.disabled) return;
-  const action = button.dataset.action
-    ? JSON.parse(button.dataset.action)
-    : { type: "key", key: button.dataset.key };
-  send(action);
-  if (button.hasAttribute("data-repeat")) {
-    repeatTimer = setTimeout(() => {
-      repeatTimer = setInterval(() => send(action, { buzz: false }), 110);
-    }, 400);
-  }
+  // A hold has already sent; its release shouldn't add one more. Keyboard
+  // clicks (detail 0) never follow a hold.
+  if (repeated && event.detail !== 0) return;
+  send(actionOf(button));
+});
+
+// Holding a data-repeat button starts sending once the hold is sure. A scroll
+// begun on it is a pointercancel before then, so it sends nothing.
+document.addEventListener("pointerdown", (event) => {
+  stopRepeat();
+  repeated = false;
+  const button = event.target.closest("[data-repeat]");
+  if (!button || button.disabled) return;
+  const action = actionOf(button);
+  repeatTimer = setTimeout(() => {
+    repeated = true;
+    send(action);
+    repeatTimer = setInterval(() => send(action, { buzz: false }), 110);
+  }, 400);
 });
 ["pointerup", "pointercancel"].forEach((type) => document.addEventListener(type, stopRepeat));
 

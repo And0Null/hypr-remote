@@ -30,7 +30,16 @@ async function sampleCpu() {
   return { idle, total, at: Date.now() };
 }
 
-async function readCpu(): Promise<number | null> {
+// Overlapping reads would each take a sample and leave the next a sliver of
+// time to measure (noisy, or null), so they share whichever is in flight.
+let cpuRead: Promise<number | null> | null = null;
+
+function readCpu(): Promise<number | null> {
+  cpuRead ??= measureCpu().finally(() => (cpuRead = null));
+  return cpuRead;
+}
+
+async function measureCpu(): Promise<number | null> {
   let previous = lastCpu;
   if (!previous || Date.now() - previous.at > 10_000) {
     previous = await sampleCpu();
