@@ -23,7 +23,9 @@ import { applyScene, type Scene } from "./scenes";
  * addresses, sink names, URLs) are constrained here or checked again against
  * live data in the feature that uses them.
  */
-const workspaceId = z.number().int().min(1).max(10);
+// Past 10 for setups with more workspaces than number keys; capped so a bad
+// message can't conjure workspace 4000000.
+const workspaceId = z.number().int().min(1).max(99);
 const address = z.string().regex(/^0x[0-9a-f]{1,16}$/);
 
 export const Action = z.discriminatedUnion("type", [
@@ -35,31 +37,25 @@ export const Action = z.discriminatedUnion("type", [
   z.object({ type: z.literal("workspace"), id: workspaceId }),
   z.object({ type: z.literal("lock") }),
 
-  // 1.1 windows
   z.object({ type: z.literal("window"), op: z.enum(["focus", "close"]), address }),
   z.object({ type: z.literal("window-move"), address, workspace: workspaceId }),
-  // 1.2 scenes
   z.object({ type: z.literal("scene"), id: z.string().max(24) }),
-  // 1.3 audio output
+  // The default audio output.
   z.object({ type: z.literal("sink"), name: z.string().max(256) }),
-  // 1.4 notifications
   z.object({ type: z.literal("notifications"), op: z.enum(["toggle-dnd", "clear"]) }),
-  // 1.5 radios
   z.object({ type: z.literal("radio"), device: z.enum(["wifi", "bluetooth"]), on: z.boolean() }),
 
-  // 2.1 clipboard
   z.object({ type: z.literal("clipboard-set"), text: z.string().max(CLIPBOARD_LIMIT) }),
   z.object({ type: z.literal("clipboard-get") }),
-  // 2.3 links (files go over HTTP; see /upload)
+  // Links only; files go over HTTP (see /upload).
   z.object({ type: z.literal("open-link"), url: z.string().max(4096) }),
 
-  // 3.1 / 3.2 keyboard and slides
   z.object({ type: z.literal("type"), text: z.string().min(1).max(TEXT_LIMIT) }),
+  // Named keys, which also drive slides (page-up/down, blank).
   z.object({
     type: z.literal("key"),
     key: z.enum(Object.keys(KEYS) as [KeyName, ...KeyName[]]),
   }),
-  // 3.3 touchpad
   z.object({
     type: z.literal("pointer-move"),
     dx: z.number().finite().min(-2000).max(2000),
