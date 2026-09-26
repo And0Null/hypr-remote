@@ -3,12 +3,19 @@
     "target": "ESNext",
     "module": "ESNext",
     "moduleResolution": "bundler",
+    // Every file is a module, as app.js is in the browser (type="module"), so
+    // the client's top-level names don't leak into the server's globals.
+    "moduleDetection": "force",
     "lib": ["ESNext", "DOM"],
     "types": ["bun"],
     "strict": true,
     "noUncheckedIndexedAccess": true,
     "skipLibCheck": true,
-    "noEmit": true
+    "noEmit": true,
+    // The client stays plain JS; JSDoc types check it against the server's.
+    "allowJs": true,
+    "checkJs": true
   },
-  "include": ["src", "scripts"]
+  // Not sw.js: a service worker needs the WebWorker lib, which clashes with DOM.
+  "include": ["src", "scripts", "test", "public/app.js"]
 }

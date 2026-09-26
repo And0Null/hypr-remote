@@ -5,11 +5,15 @@ const SINK = "@DEFAULT_AUDIO_SINK@";
 export type Volume = { level: number; muted: boolean };
 export type Sink = { name: string; label: string; active: boolean };
 
-/** "Volume: 0.45 [MUTED]" → { level: 45, muted: true } */
 export async function readVolume(): Promise<Volume | null> {
   const output = await read(["wpctl", "get-volume", SINK]);
-  const match = output?.match(/Volume:\s*([\d.]+)/);
-  if (!output || !match?.[1]) return null;
+  return output ? parseVolume(output) : null;
+}
+
+/** "Volume: 0.45 [MUTED]" → { level: 45, muted: true } */
+export function parseVolume(output: string): Volume | null {
+  const match = output.match(/Volume:\s*([\d.]+)/);
+  if (!match?.[1]) return null;
   return { level: Math.round(Number(match[1]) * 100), muted: output.includes("[MUTED]") };
 }
 

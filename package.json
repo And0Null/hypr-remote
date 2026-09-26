@@ -7,6 +7,7 @@
     "start": "bun src/server.ts",
     "dev": "bun --watch src/server.ts",
     "check": "tsc --noEmit",
+    "test": "bun test",
     "install-service": "bun scripts/install-service.ts"
   },
   "dependencies": {

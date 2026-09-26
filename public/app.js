@@ -1,8 +1,16 @@
+// @ts-check
 // hypr-remote phone client. Plain JS, no build step: the server serves this
-// file as-is.
+// file as-is. The JSDoc types come from the server, so `bun run check` catches
+// the two drifting apart.
 
-const $ = (id) => document.getElementById(id);
-const pad2 = (n) => String(n).padStart(2, "0");
+/** @typedef {import("../src/actions").Action} Action */
+/** @typedef {import("../src/actions").Reply} Reply */
+/** @typedef {import("../src/state").State} State */
+/** @typedef {{ type: "state"; state: State } | Reply} Message */
+
+// Every id looked up is in index.html; a missing one is a bug, not a state.
+const $ = (/** @type {string} */ id) => /** @type {HTMLElement} */ (document.getElementById(id));
+const pad2 = (/** @type {number} */ n) => String(n).padStart(2, "0");
 
 /* -------------------------------------------------------------------------- */
 /* Pairing                                                                    */
@@ -11,10 +19,14 @@ const pad2 = (n) => String(n).padStart(2, "0");
 // The terminal's QR code carries ?t=<token>. Keep it, then drop it from the
 // address bar so it isn't left in screenshots or history.
 const params = new URLSearchParams(location.search);
+/**
+ * @param {"get" | "set"} action
+ * @param {string | null} [value]
+ */
 function storage(action, value) {
   try {
     if (action === "get") return localStorage.getItem("hypr-remote-token");
-    localStorage.setItem("hypr-remote-token", value);
+    localStorage.setItem("hypr-remote-token", /** @type {string} */ (value));
   } catch {
     return null;
   }
@@ -33,17 +45,23 @@ const config = location.protocol === "http:" ? fetch("/config.json").then((r) =>
 /* Connection                                                                 */
 /* -------------------------------------------------------------------------- */
 
+/** @type {WebSocket | null} */
 let socket = null;
 let retry = 500;
 let everOpened = false;
-let state = null;
+// Unset until the first state message; only the touchpad reads it before then.
+/** @type {State} */
+let state;
 
+/** @param {string} text */
 function showBanner(text) {
   $("banner").textContent = text;
   $("banner").dataset.show = text ? "true" : "false";
 }
 
+/** @type {ReturnType<typeof setTimeout> | undefined} */
 let toastTimer;
+/** @param {string} text */
 function toast(text) {
   $("toast").textContent = text;
   $("toast").dataset.show = "true";
@@ -68,6 +86,7 @@ function connect() {
   };
 
   socket.onmessage = (event) => {
+    /** @type {Message} */
     const message = JSON.parse(event.data);
     if (message.type === "state") render(message.state);
     if (message.type === "toast") toast(message.text);
@@ -84,7 +103,10 @@ function connect() {
   };
 }
 
-/** The old http:// address can't pair any more; point at the secure one. */
+/**
+ * The old http:// address can't pair any more; point at the secure one.
+ * @param {{ address: string; httpsPort: number }} config
+ */
 function guideToSecure({ address, httpsPort }) {
   if (!token) return connect(); // shows "not paired"
   $("status-text").textContent = "offline";
@@ -99,6 +121,10 @@ function guideToSecure({ address, httpsPort }) {
   );
 }
 
+/**
+ * @param {Action} action
+ * @param {{ buzz?: boolean }} [options]
+ */
 function send(action, { buzz = true } = {}) {
   if (socket?.readyState !== WebSocket.OPEN) return false;
   socket.send(JSON.stringify(action));
@@ -110,11 +136,12 @@ function send(action, { buzz = true } = {}) {
 /* Tabs                                                                       */
 /* -------------------------------------------------------------------------- */
 
+/** @param {string} name */
 function showTab(name) {
-  document.querySelectorAll("[role=tab]").forEach((tab) => {
+  /** @type {NodeListOf<HTMLElement>} */ (document.querySelectorAll("[role=tab]")).forEach((tab) => {
     tab.setAttribute("aria-selected", String(tab.dataset.tab === name));
   });
-  document.querySelectorAll(".tab").forEach((section) => {
+  /** @type {NodeListOf<HTMLElement>} */ (document.querySelectorAll(".tab")).forEach((section) => {
     section.dataset.active = String(section.id === `tab-${name}`);
   });
   try {
@@ -123,8 +150,8 @@ function showTab(name) {
   updateScreenPolling();
 }
 
-document.querySelectorAll("[role=tab]").forEach((tab) =>
-  tab.addEventListener("click", () => showTab(tab.dataset.tab)),
+/** @type {NodeListOf<HTMLElement>} */ (document.querySelectorAll("[role=tab]")).forEach((tab) =>
+  tab.addEventListener("click", () => showTab(/** @type {string} */ (tab.dataset.tab))),
 );
 try {
   showTab(localStorage.getItem("hypr-remote-tab") ?? "desk");
@@ -134,22 +161,32 @@ try {
 /* Rendering                                                                  */
 /* -------------------------------------------------------------------------- */
 
+/**
+ * @param {string} id
+ * @param {number | null} percent
+ */
 function setMeter(id, percent, alert = false) {
   const meter = $(id);
   meter.dataset.alert = String(alert);
-  meter.firstElementChild.style.width = `${Math.max(0, Math.min(100, percent ?? 0))}%`;
+  /** @type {HTMLElement} */ (meter.firstElementChild).style.width = `${Math.max(0, Math.min(100, percent ?? 0))}%`;
 }
 
 // Sliders are left alone while a finger is on them, or the next state update
 // would yank the thumb back mid-drag.
 const dragging = new Set();
+/**
+ * @param {string} id
+ * @param {number | null | undefined} value
+ */
 function setSlider(id, value) {
-  const slider = $(id);
+  const slider = /** @type {HTMLInputElement} */ ($(id));
   if (dragging.has(id) || value == null) return;
-  slider.value = value;
-  slider.style.setProperty("--fill", `${((value - slider.min) / (slider.max - slider.min)) * 100}%`);
+  slider.value = String(value);
+  const [min, max] = [Number(slider.min), Number(slider.max)];
+  slider.style.setProperty("--fill", `${((value - min) / (max - min)) * 100}%`);
 }
 
+/** @param {State} next */
 function render(next) {
   state = next;
   renderDesk();
@@ -164,18 +201,27 @@ function renderDesk() {
 
   const occupied = new Map(state.workspaces.map((w) => [w.id, w.windows]));
   const grid = $("workspaces");
-  if (!grid.children.length) {
-    for (let id = 1; id <= 10; id++) {
-      const button = document.createElement("button");
-      button.textContent = id === 10 ? "0" : String(id);
-      button.setAttribute("aria-label", `workspace ${id}`);
-      button.dataset.action = JSON.stringify({ type: "workspace", id });
-      grid.append(button);
-    }
+  // Rebuilt only when a workspace past 10 comes or goes, or one is renamed.
+  const ids = workspaceIds();
+  const key = ids.map((id) => `${id}:${workspaceLabel(id)}`).join();
+  if (grid.dataset.key !== key) {
+    grid.dataset.key = key;
+    grid.replaceChildren(
+      ...ids.map((id) => {
+        const button = document.createElement("button");
+        button.className = "truncate";
+        button.textContent = workspaceLabel(id);
+        button.setAttribute("aria-label", `workspace ${workspaceName(id) ?? id}`);
+        button.dataset.action = JSON.stringify({ type: "workspace", id });
+        button.dataset.id = String(id);
+        return button;
+      }),
+    );
   }
-  [...grid.children].forEach((button, index) => {
-    button.dataset.active = String(index + 1 === state.activeWorkspace);
-    button.dataset.occupied = String((occupied.get(index + 1) ?? 0) > 0);
+  grid.querySelectorAll("button").forEach((button) => {
+    const id = Number(button.dataset.id);
+    button.dataset.active = String(id === state.activeWorkspace);
+    button.dataset.occupied = String((occupied.get(id) ?? 0) > 0);
   });
 
   renderWindows();
@@ -188,9 +234,28 @@ function renderDesk() {
     media?.status === "Playing" ? '<path d="M7 5h4v14H7zM13 5h4v14h-4z" />' : '<path d="M8 5v14l11-7z" />';
 }
 
+/** 1–10 always, as on the number keys, then any workspace past them that exists. */
+function workspaceIds() {
+  const beyond = state.workspaces.map((w) => w.id).filter((id) => id > 10);
+  return [...Array.from({ length: 10 }, (_, index) => index + 1), ...beyond];
+}
+
+/**
+ * The name a workspace was given in Hyprland, or null for a plain numbered one.
+ * @param {number} id
+ */
+function workspaceName(id) {
+  const name = state.workspaces.find((w) => w.id === id)?.name;
+  return name && name !== String(id) ? name : null;
+}
+
+/** @param {number} id */
+const workspaceLabel = (id) => workspaceName(id) ?? (id === 10 ? "0" : String(id));
+
 // Rebuilt only when the set of windows changes, so a row mid-swipe isn't
 // replaced under the finger by a routine state update.
 let windowsKey = "";
+/** @type {string | null} */
 let movingAddress = null;
 
 function renderWindows() {
@@ -217,9 +282,9 @@ function renderWindows() {
           <button class="move">move</button>
         </div>`;
       // textContent, not innerHTML: window titles are arbitrary text.
-      row.querySelector(".app").textContent = win.app;
-      row.querySelector(".title").textContent = win.title;
-      row.querySelector(".move").addEventListener("click", (event) => {
+      /** @type {HTMLElement} */ (row.querySelector(".app")).textContent = win.app;
+      /** @type {HTMLElement} */ (row.querySelector(".title")).textContent = win.title;
+      /** @type {HTMLElement} */ (row.querySelector(".move")).addEventListener("click", (event) => {
         event.stopPropagation();
         movingAddress = movingAddress === win.address ? null : win.address;
         renderWindows();
@@ -228,9 +293,10 @@ function renderWindows() {
       if (movingAddress === win.address) {
         const picker = document.createElement("div");
         picker.className = "move-picker";
-        for (let id = 1; id <= 10; id++) {
+        for (const id of workspaceIds()) {
           const button = document.createElement("button");
-          button.textContent = id === 10 ? "0" : String(id);
+          button.className = "truncate";
+          button.textContent = workspaceLabel(id);
           button.disabled = id === win.workspace;
           button.addEventListener("click", () => {
             send({ type: "window-move", address: win.address, workspace: id });
@@ -247,16 +313,21 @@ function renderWindows() {
   );
 }
 
-/** Swipe left past a third of the row to close it; a tap focuses it. */
+/**
+ * Swipe left past a third of the row to close it; a tap focuses it.
+ * @param {HTMLElement} row
+ * @param {State["windows"][number]} win
+ */
 function attachSwipe(row, win) {
-  const body = row.querySelector(".window-body");
+  const body = /** @type {HTMLElement} */ (row.querySelector(".window-body"));
+  /** @type {number | null} */
   let startX = null;
-  let startY = null;
+  let startY = 0;
   let dx = 0;
   let swiping = false;
 
   body.addEventListener("pointerdown", (event) => {
-    if (event.target.closest("button")) return;
+    if (/** @type {Element} */ (event.target).closest("button")) return;
     startX = event.clientX;
     startY = event.clientY;
     dx = 0;
@@ -373,7 +444,7 @@ function renderBridge() {
   // Stats
   const stats = state.stats;
   $("cpu").textContent = stats.cpu == null ? "--" : pad2(stats.cpu);
-  setMeter("cpu-meter", stats.cpu, stats.cpu > 85);
+  setMeter("cpu-meter", stats.cpu, (stats.cpu ?? 0) > 85);
   if (stats.memory) {
     $("memory").textContent = (stats.memory.used / 1024).toFixed(1);
     setMeter("memory-meter", (stats.memory.used / stats.memory.total) * 100);
@@ -383,8 +454,8 @@ function renderBridge() {
     $("battery-label").textContent = stats.battery.charging ? "battery · charging" : "battery";
     setMeter("battery-meter", stats.battery.level, stats.battery.level <= 15 && !stats.battery.charging);
   }
-  $("temperature").textContent = stats.temperature ?? "--";
-  setMeter("temperature-meter", stats.temperature, stats.temperature >= 85);
+  $("temperature").textContent = String(stats.temperature ?? "--");
+  setMeter("temperature-meter", stats.temperature, (stats.temperature ?? 0) >= 85);
   if (stats.uptimeMinutes != null) {
     const hours = Math.floor(stats.uptimeMinutes / 60);
     $("uptime").textContent = `up ${hours ? `${hours}h ` : ""}${stats.uptimeMinutes % 60}m`;
@@ -393,9 +464,13 @@ function renderBridge() {
 
 function renderInput() {
   const { keyboard, clicks } = state.input;
-  document.querySelectorAll('[data-needs="keyboard"]').forEach((b) => (b.disabled = !keyboard));
-  document.querySelectorAll('[data-needs="clicks"]').forEach((b) => (b.disabled = !clicks));
-  $("typing").disabled = !keyboard;
+  /** @type {NodeListOf<HTMLButtonElement>} */ (document.querySelectorAll('[data-needs="keyboard"]')).forEach(
+    (b) => (b.disabled = !keyboard),
+  );
+  /** @type {NodeListOf<HTMLButtonElement>} */ (document.querySelectorAll('[data-needs="clicks"]')).forEach(
+    (b) => (b.disabled = !clicks),
+  );
+  /** @type {HTMLInputElement} */ ($("typing")).disabled = !keyboard;
   $("keyboard-hint").hidden = keyboard;
   $("clicks-hint").hidden = clicks;
 }
@@ -406,21 +481,29 @@ function renderInput() {
 
 // data-action sends its JSON; data-key presses a named key. Either can carry
 // data-repeat to keep firing while held (volume, arrows, backspace).
-let repeatTimer = null;
+/** @type {ReturnType<typeof setTimeout> | undefined} */
+let repeatTimer = undefined;
 let repeated = false;
 function stopRepeat() {
   clearTimeout(repeatTimer);
   clearInterval(repeatTimer);
-  repeatTimer = null;
+  repeatTimer = undefined;
 }
 
+/**
+ * @param {HTMLElement} button
+ * @returns {Action}
+ */
 const actionOf = (button) =>
-  button.dataset.action ? JSON.parse(button.dataset.action) : { type: "key", key: button.dataset.key };
+  button.dataset.action
+    ? JSON.parse(button.dataset.action)
+    : /** @type {Action} */ ({ type: "key", key: button.dataset.key });
 
 // Click, not pointerdown: the browser withholds it when a touch turns into a
 // scroll, and keyboards and switch access produce it too.
 document.addEventListener("click", (event) => {
-  const button = event.target.closest("[data-action], [data-key]");
+  /** @type {HTMLButtonElement | null} */
+  const button = /** @type {Element} */ (event.target).closest("[data-action], [data-key]");
   if (!button || button.disabled) return;
   // A hold has already sent; its release shouldn't add one more. Keyboard
   // clicks (detail 0) never follow a hold.
@@ -433,7 +516,8 @@ document.addEventListener("click", (event) => {
 document.addEventListener("pointerdown", (event) => {
   stopRepeat();
   repeated = false;
-  const button = event.target.closest("[data-repeat]");
+  /** @type {HTMLButtonElement | null} */
+  const button = /** @type {Element} */ (event.target).closest("[data-repeat]");
   if (!button || button.disabled) return;
   const action = actionOf(button);
   repeatTimer = setTimeout(() => {
@@ -444,13 +528,18 @@ document.addEventListener("pointerdown", (event) => {
 });
 ["pointerup", "pointercancel"].forEach((type) => document.addEventListener(type, stopRepeat));
 
-// Sliders send while dragging, at most every 80ms.
+/**
+ * Sliders send while dragging, at most every 80ms.
+ * @param {string} id
+ * @param {(level: number) => Action} toAction
+ */
 function wireSlider(id, toAction) {
-  const slider = $(id);
+  const slider = /** @type {HTMLInputElement} */ ($(id));
   let last = 0;
   slider.addEventListener("pointerdown", () => dragging.add(id));
   slider.addEventListener("input", () => {
-    slider.style.setProperty("--fill", `${((slider.value - slider.min) / (slider.max - slider.min)) * 100}%`);
+    const [min, max] = [Number(slider.min), Number(slider.max)];
+    slider.style.setProperty("--fill", `${((Number(slider.value) - min) / (max - min)) * 100}%`);
     if (Date.now() - last < 80) return;
     last = Date.now();
     send(toAction(Number(slider.value)), { buzz: false });
@@ -470,6 +559,7 @@ $("bluetooth").addEventListener("click", () =>
 
 // Wi-Fi off cuts this very connection, and nothing on the phone can bring it
 // back. Turning it off takes a second tap within three seconds.
+/** @type {ReturnType<typeof setTimeout> | null} */
 let wifiArmed = null;
 $("wifi").addEventListener("click", () => {
   const on = $("wifi").dataset.on === "true";
@@ -488,8 +578,9 @@ $("wifi").addEventListener("click", () => {
 });
 
 // Hold-to-confirm (lock): a stray tap in a pocket shouldn't lock the laptop.
-document.querySelectorAll("[data-hold]").forEach((button) => {
-  let timer = null;
+/** @type {NodeListOf<HTMLElement>} */ (document.querySelectorAll("[data-hold]")).forEach((button) => {
+  /** @type {ReturnType<typeof setTimeout> | undefined} */
+  let timer = undefined;
   const cancel = () => {
     clearTimeout(timer);
     button.dataset.holding = "false";
@@ -497,7 +588,7 @@ document.querySelectorAll("[data-hold]").forEach((button) => {
   button.addEventListener("pointerdown", () => {
     button.dataset.holding = "true";
     timer = setTimeout(() => {
-      send(JSON.parse(button.dataset.hold));
+      send(JSON.parse(/** @type {string} */ (button.dataset.hold)));
       navigator.vibrate?.([20, 40, 20]);
       cancel();
     }, 800);
@@ -511,15 +602,16 @@ document.querySelectorAll("[data-hold]").forEach((button) => {
 /* -------------------------------------------------------------------------- */
 
 $("clipboard-send").addEventListener("click", () => {
-  const text = $("clipboard").value;
+  const text = /** @type {HTMLTextAreaElement} */ ($("clipboard")).value;
   if (!text) return toast("nothing to send");
   send({ type: "clipboard-set", text });
 });
 
 $("clipboard-get").addEventListener("click", () => send({ type: "clipboard-get" }));
 
+/** @param {string} text */
 async function receiveClipboard(text) {
-  $("clipboard").value = text;
+  /** @type {HTMLTextAreaElement} */ ($("clipboard")).value = text;
   if (!text) return toast("laptop clipboard is empty");
   // Writing to the phone's clipboard needs HTTPS; on plain HTTP the text is
   // still in the box, ready to copy by hand.
@@ -532,22 +624,27 @@ async function receiveClipboard(text) {
 }
 
 $("link-open").addEventListener("click", () => {
-  const url = $("link").value.trim();
+  const url = /** @type {HTMLInputElement} */ ($("link")).value.trim();
   if (!url) return toast("paste a link first");
   send({ type: "open-link", url: /^https?:\/\//i.test(url) ? url : `https://${url}` });
 });
 
 $("file-pick").addEventListener("click", () => $("file").click());
-// One file per request, as the raw body, so the laptop can stream it straight
-// to disk. XHR rather than fetch: it reports upload progress. Resolves to the
-// saved name, or null.
+/**
+ * One file per request, as the raw body, so the laptop can stream it straight
+ * to disk. XHR rather than fetch: it reports upload progress. Resolves to the
+ * saved name, or null.
+ * @param {File} file
+ * @param {(loaded: number) => void} onProgress
+ * @returns {Promise<string | null>}
+ */
 function uploadFile(file, onProgress) {
   return new Promise((resolve) => {
     const request = new XMLHttpRequest();
     request.upload.onprogress = (event) => onProgress(event.loaded);
     request.onloadend = () => resolve(request.status === 200 ? JSON.parse(request.responseText).saved : null);
     request.open("POST", "/upload");
-    request.setRequestHeader("x-token", token);
+    request.setRequestHeader("x-token", token ?? "");
     // Header values must be plain ASCII; the laptop decodes it.
     request.setRequestHeader("x-filename", encodeURIComponent(file.name));
     request.send(file);
@@ -555,23 +652,25 @@ function uploadFile(file, onProgress) {
 }
 
 $("file").addEventListener("change", async () => {
-  const files = [...$("file").files];
+  const input = /** @type {HTMLInputElement} */ ($("file"));
+  const files = [.../** @type {FileList} */ (input.files)];
   if (!files.length) return;
   const bar = $("upload-progress");
+  const fill = /** @type {HTMLElement} */ (bar.firstElementChild);
   bar.style.display = "block";
   const total = files.reduce((sum, file) => sum + file.size, 0) || 1;
   let done = 0;
   const saved = [];
   for (const file of files) {
     const name = await uploadFile(file, (loaded) => {
-      bar.firstElementChild.style.width = `${((done + loaded) / total) * 100}%`;
+      fill.style.width = `${((done + loaded) / total) * 100}%`;
     });
     if (name) saved.push(name);
     done += file.size;
   }
   bar.style.display = "none";
-  bar.firstElementChild.style.width = "0";
-  $("file").value = "";
+  fill.style.width = "0";
+  input.value = "";
   if (!saved.length) toast("upload failed");
   else if (saved.length < files.length) toast(`saved ${saved.length} of ${files.length} files`);
   else toast(saved.length === 1 ? `saved ${saved[0]}` : `saved ${saved.length} files`);
@@ -579,22 +678,26 @@ $("file").addEventListener("change", async () => {
 
 // Screen preview: polled only while the bridge tab is open and a monitor is
 // picked, and each frame is requested only after the last one arrived.
+/** @type {string | null} */
 let previewMonitor = null;
-let previewTimer = null;
+/** @type {ReturnType<typeof setTimeout> | undefined} */
+let previewTimer = undefined;
 // Frames are fetched with the token in a header, not the URL, and shown
 // through object URLs; the previous one is revoked so frames don't pile up.
+/** @type {string | null} */
 let previewUrl = null;
 
+/** @param {string | null} url */
 function showFrame(url) {
   const old = previewUrl;
   previewUrl = url;
-  if (url) $("screen").src = url;
+  if (url) /** @type {HTMLImageElement} */ ($("screen")).src = url;
   else $("screen").removeAttribute("src");
   if (old) URL.revokeObjectURL(old);
 }
 
 function renderMonitorPills() {
-  document.querySelectorAll("#monitors button").forEach((button) => {
+  /** @type {NodeListOf<HTMLElement>} */ (document.querySelectorAll("#monitors button")).forEach((button) => {
     button.dataset.active = String(button.dataset.name === previewMonitor);
   });
 }
@@ -612,7 +715,7 @@ function updateScreenPolling() {
     return;
   }
   $("screen-status").textContent = "live";
-  fetch(`/screen?m=${encodeURIComponent(previewMonitor)}`, { headers: { "x-token": token }, cache: "no-store" })
+  fetch(`/screen?m=${encodeURIComponent(previewMonitor)}`, { headers: { "x-token": token ?? "" }, cache: "no-store" })
     .then((response) => {
       if (!response.ok) throw new Error(`screen: ${response.status}`);
       return response.blob();
@@ -693,12 +796,19 @@ renderInstall().catch(() => {});
 /* -------------------------------------------------------------------------- */
 
 const pad = $("pad");
+/** @type {Map<number, { x: number; y: number }>} */
 const touches = new Map();
-let gesture = null; // { fingers, startTime, moved, scrollCarry }
+/** @type {{ fingers: number; startTime: number; moved: number; scrollCarry: number } | null} */
+let gesture = null;
 let move = { dx: 0, dy: 0 };
+/** @type {number | null} */
 let moveFrame = null;
 
-// Moves are batched to one message per animation frame.
+/**
+ * Moves are batched to one message per animation frame.
+ * @param {number} dx
+ * @param {number} dy
+ */
 function queueMove(dx, dy) {
   move.dx += dx;
   move.dy += dy;
@@ -711,7 +821,7 @@ function queueMove(dx, dy) {
 }
 
 // Pointer acceleration: slow drags are precise, fast flicks cross the desk.
-const accelerate = (delta) => delta * (1.4 + Math.min(Math.abs(delta) * 0.12, 2.6));
+const accelerate = (/** @type {number} */ delta) => delta * (1.4 + Math.min(Math.abs(delta) * 0.12, 2.6));
 
 pad.addEventListener("pointerdown", (event) => {
   pad.setPointerCapture(event.pointerId);
@@ -743,6 +853,7 @@ pad.addEventListener("pointermove", (event) => {
   }
 });
 
+/** @param {PointerEvent} event */
 function endTouch(event) {
   touches.delete(event.pointerId);
   if (touches.size > 0 || !gesture) return;
@@ -760,7 +871,7 @@ pad.addEventListener("pointercancel", endTouch);
 // Live typing: the field stays empty and each edit is forwarded as it
 // happens. beforeinput tells us what the phone keyboard meant (text,
 // backspace, enter) even when autocorrect rewrites words.
-const typing = $("typing");
+const typing = /** @type {HTMLInputElement} */ ($("typing"));
 typing.addEventListener("beforeinput", (event) => {
   event.preventDefault();
   switch (event.inputType) {

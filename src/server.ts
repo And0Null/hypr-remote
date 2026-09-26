@@ -183,7 +183,7 @@ async function handle(request: Request, server: Server<undefined>): Promise<Resp
       : new Response("Expected a WebSocket", { status: 400 });
   }
 
-  // 2.2 — a live look at one monitor.
+  // A live look at one monitor.
   if (url.pathname === "/screen") {
     if (!authorised(request)) return new Response("Not paired", { status: 401 });
     const image = await captureMonitor(url.searchParams.get("m") ?? "");
@@ -192,8 +192,8 @@ async function handle(request: Request, server: Server<undefined>): Promise<Resp
       : new Response("No such monitor", { status: 404 });
   }
 
-  // 2.3 — files from the phone land in ~/Downloads. One file per request, as
-  // the raw body, streamed to disk; the name comes URI-encoded in a header.
+  // Files from the phone land in ~/Downloads. One file per request, as the raw
+  // body, streamed to disk; the name comes URI-encoded in a header.
   if (url.pathname === "/upload" && request.method === "POST") {
     if (!authorised(request)) return new Response("Not paired", { status: 401 });
     let name: string;
@@ -211,8 +211,8 @@ async function handle(request: Request, server: Server<undefined>): Promise<Resp
     }
   }
 
-  // 4.3 — the certificate authority the phone installs to trust HTTPS. Public
-  // by design: a certificate is not a secret; its private key never leaves
+  // The certificate authority the phone installs to trust HTTPS. Public by
+  // design: a certificate is not a secret; its private key never leaves
   // ~/.config/hypr-remote.
   if (url.pathname === "/ca.crt") {
     return new Response(Bun.file(CA_CERT), {

@@ -8,8 +8,11 @@ export type Window = {
   focused: boolean;
 };
 
+/** `name` is the id as text unless the workspace was given a name in Hyprland. */
+export type Workspace = { id: number; name: string; windows: number; monitor: string };
+
 export type DesktopSnapshot = {
-  workspaces: { id: number; windows: number; monitor: string }[];
+  workspaces: Workspace[];
   activeWorkspace: number | null;
   activeWindow: string | null;
   windows: Window[];
@@ -18,12 +21,21 @@ export type DesktopSnapshot = {
 
 export async function readDesktop(): Promise<DesktopSnapshot> {
   const [workspaces, active, clients, monitors] = await Promise.all([
-    hyprJson<{ id: number; windows: number; monitor: string }[]>("workspaces"),
+    hyprJson<Workspace[]>("workspaces"),
     hyprJson<{ id: number }>("activeworkspace"),
     hyprJson<Client[]>("clients"),
     hyprJson<Monitor[]>("monitors"),
   ]);
+  return toSnapshot(workspaces, active, clients, monitors);
+}
 
+/** Hyprland's replies, any of which may have failed, as the phone sees them. */
+export function toSnapshot(
+  workspaces: Workspace[] | null,
+  active: { id: number } | null,
+  clients: Client[] | null,
+  monitors: Monitor[] | null,
+): DesktopSnapshot {
   const windows = (clients ?? [])
     // Negative ids are special workspaces (scratchpads); not reachable here.
     .filter((client) => client.workspace.id > 0 && client.title !== "")
@@ -39,7 +51,7 @@ export async function readDesktop(): Promise<DesktopSnapshot> {
   return {
     workspaces: (workspaces ?? [])
       .filter((workspace) => workspace.id > 0)
-      .map(({ id, windows, monitor }) => ({ id, windows, monitor }))
+      .map(({ id, name, windows, monitor }) => ({ id, name, windows, monitor }))
       .sort((a, b) => a.id - b.id),
     activeWorkspace: active?.id ?? null,
     activeWindow: windows.find((window) => window.focused)?.title ?? null,

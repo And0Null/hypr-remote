@@ -78,7 +78,7 @@ async function refreshGeometry() {
 }
 
 /** Keeps the cursor on some screen: across gaps between monitors, not off the edge of the desk. */
-function clampToScreens(x: number, y: number) {
+export function clampToScreens(x: number, y: number, screens: readonly Rect[]) {
   let best = { x, y, distance: Infinity };
   for (const screen of screens) {
     const cx = Math.min(Math.max(x, screen.x), screen.x + screen.width - 1);
@@ -105,7 +105,7 @@ async function flush() {
       }
       lastMove = Date.now();
 
-      cursor = clampToScreens(cursor.x + dx, cursor.y + dy);
+      cursor = clampToScreens(cursor.x + dx, cursor.y + dy, screens);
       await dispatch(`movecursor ${Math.round(cursor.x)} ${Math.round(cursor.y)}`);
     }
   } finally {
