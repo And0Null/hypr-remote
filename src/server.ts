@@ -16,6 +16,8 @@ const HTTP_PORT = Number(process.env.PORT ?? 4000);
 const HTTPS_PORT = Number(process.env.HTTPS_PORT ?? 4443);
 const PUBLIC_DIR = join(import.meta.dir, "..", "public");
 const UPLOAD_LIMIT = 512 * 1024 * 1024;
+// Opt back into pairing over plain HTTP even while HTTPS runs.
+const ALLOW_HTTP = process.env.HYPR_REMOTE_ALLOW_HTTP === "1";
 
 // Under systemd, exiting is how we restart: it relaunches us with fresh state.
 const UNDER_SYSTEMD = Boolean(process.env.INVOCATION_ID);
@@ -152,12 +154,27 @@ async function serveStatic(pathname: string): Promise<Response | null> {
   });
 }
 
-function authorised(request: Request, url: URL) {
-  return tokenMatches(url.searchParams.get("t") ?? request.headers.get("x-token"), token);
+/**
+ * The token comes in the x-token header, which stays out of history and logs.
+ * Only /ws passes `url` to allow ?t=: browsers can't set WebSocket headers.
+ */
+function authorised(request: Request, url?: URL) {
+  return tokenMatches(url?.searchParams.get("t") ?? request.headers.get("x-token"), token);
 }
+
+// Set once HTTPS is up. From then on the token, and with it typing on this
+// laptop, never crosses plain HTTP, where anyone on the Wi-Fi can read it.
+let httpsRunning = false;
+const PAIRED_PATHS = new Set(["/ws", "/screen", "/upload"]);
 
 async function handle(request: Request, server: Server<undefined>): Promise<Response | undefined> {
   const url = new URL(request.url);
+
+  if (PAIRED_PATHS.has(url.pathname) && httpsRunning && !ALLOW_HTTP && server.url.protocol === "http:") {
+    return new Response("Plain HTTP is off: open the https:// address, or re-scan the QR code.", {
+      status: 403,
+    });
+  }
 
   if (url.pathname === "/ws") {
     if (!authorised(request, url)) return new Response("Not paired", { status: 401 });
@@ -168,22 +185,30 @@ async function handle(request: Request, server: Server<undefined>): Promise<Resp
 
   // 2.2 — a live look at one monitor.
   if (url.pathname === "/screen") {
-    if (!authorised(request, url)) return new Response("Not paired", { status: 401 });
+    if (!authorised(request)) return new Response("Not paired", { status: 401 });
     const image = await captureMonitor(url.searchParams.get("m") ?? "");
     return image
       ? new Response(image, { headers: { "Content-Type": "image/jpeg", "Cache-Control": "no-store" } })
       : new Response("No such monitor", { status: 404 });
   }
 
-  // 2.3 — files from the phone land in ~/Downloads.
+  // 2.3 — files from the phone land in ~/Downloads. One file per request, as
+  // the raw body, streamed to disk; the name comes URI-encoded in a header.
   if (url.pathname === "/upload" && request.method === "POST") {
-    if (!authorised(request, url)) return new Response("Not paired", { status: 401 });
-    const form = await request.formData().catch(() => null);
-    const files = form?.getAll("file").filter((entry): entry is File => entry instanceof File) ?? [];
-    if (files.length === 0) return Response.json({ saved: [] }, { status: 400 });
-    const saved = [];
-    for (const file of files) saved.push(await saveUpload(file));
-    return Response.json({ saved });
+    if (!authorised(request)) return new Response("Not paired", { status: 401 });
+    let name: string;
+    try {
+      name = decodeURIComponent(request.headers.get("x-filename") ?? "");
+    } catch {
+      return new Response("Bad file name", { status: 400 });
+    }
+    try {
+      const saved = await saveUpload(name, request.body, UPLOAD_LIMIT);
+      return saved ? Response.json({ saved }) : new Response("Too large", { status: 413 });
+    } catch (error) {
+      console.warn("Upload failed:", error);
+      return new Response("Upload failed", { status: 500 });
+    }
   }
 
   // 4.3 — the certificate authority the phone installs to trust HTTPS. Public
@@ -199,7 +224,7 @@ async function handle(request: Request, server: Server<undefined>): Promise<Resp
   }
 
   if (url.pathname === "/config.json") {
-    return Response.json({ httpsPort: HTTPS_PORT, address });
+    return Response.json({ httpsPort: HTTPS_PORT, address, httpAllowed: !httpsRunning || ALLOW_HTTP });
   }
 
   if (request.method === "GET") {
@@ -241,25 +266,40 @@ const websocket = {
   },
 };
 
+// Bun's cap has to admit an upload; /upload enforces the real limit while it
+// streams, and no other route reads a body.
 const common = { fetch: handle, websocket, maxRequestBodySize: UPLOAD_LIMIT };
 
-Bun.serve({ ...common, port: HTTP_PORT, hostname: "0.0.0.0" });
+// Listen on the LAN address only, not every interface (VPNs, containers).
+// That ties the sockets to this network; the address check below restarts us
+// on a new one.
+const hostname = address;
 
+// HTTPS first, so plain HTTP knows from its first request whether to refuse
+// the token.
 try {
-  Bun.serve({ ...common, port: HTTPS_PORT, hostname: "0.0.0.0", tls: await ensureCertificate(address) });
+  Bun.serve({ ...common, port: HTTPS_PORT, hostname, tls: await ensureCertificate(address) });
+  httpsRunning = true;
 } catch (error) {
-  // HTTPS is only for installing as an app; everything else works without it.
   console.warn("HTTPS disabled:", error instanceof Error ? error.message : error);
 }
 
+Bun.serve({ ...common, port: HTTP_PORT, hostname });
+
 console.log("\nhypr-remote is running.\n");
-await publishPairing(`http://${address}:${HTTP_PORT}/?t=${token}`);
+if (httpsRunning) {
+  await publishPairing(`https://${address}:${HTTPS_PORT}/?t=${token}`);
+} else {
+  console.warn("Pairing over plain HTTP: anyone on this Wi-Fi can read the token.\n");
+  await publishPairing(`http://${address}:${HTTP_PORT}/?t=${token}`);
+}
 console.log("Phone and laptop must be on the same Wi-Fi.");
 
 // A new network means a new address: the pairing code and certificate are
-// both for the old one. Under systemd, restart to reissue them.
+// both for the old one, and the sockets listen on it. Under systemd, restart
+// to reissue them and listen on the new one.
 setInterval(() => {
   if (lanAddress() === address) return;
-  console.log(`Address changed to ${lanAddress()}.`);
+  console.log(`Address changed to ${lanAddress()}.${UNDER_SYSTEMD ? "" : " Restart hypr-remote to follow it."}`);
   if (UNDER_SYSTEMD) process.exit(0);
 }, 30_000);
