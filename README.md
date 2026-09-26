@@ -22,8 +22,11 @@ bun run install-service   # start now and at every login (systemd user service)
 bun start
 ```
 
-Scan the QR code from the terminal (`journalctl --user -u hypr-remote`). To
-show it in your own bar or widget, the current code is always at
+Scan the QR code from the terminal (`journalctl --user -u hypr-remote`). It
+opens the secure `https://` address, so the pairing token never crosses the
+Wi-Fi in the clear. The first time, the browser warns about the certificate:
+continue anyway, or install the certificate (see below) so it never asks. To
+show the code in your own bar or widget, it is always at
 `~/.cache/hypr-remote/pair.png` (and the link at `pair-url`). The phone stays
 paired across restarts. Delete `~/.config/hypr-remote/token` to unpair every
 phone.
@@ -54,10 +57,16 @@ devices, which means any program running as your user can inject keystrokes.
 
 ### Install as an app (HTTPS)
 
-Browsers only install apps and allow clipboard writes over HTTPS. The server
-makes its own certificate authority in `~/.config/hypr-remote/tls` and serves
-HTTPS on 4443. The bridge tab walks you through it: download the certificate,
-install it as a CA certificate on the phone, then open the secure link.
+The server makes its own certificate authority in `~/.config/hypr-remote/tls`
+and serves HTTPS on 4443. Browsers only install apps once they trust it, so
+the bridge tab walks you through it: download the certificate, install it as
+a CA certificate on the phone, reload, then install from the browser menu.
+
+Plain HTTP on 4000 only serves the page and the certificate. The remote
+itself refuses it, because anyone on the Wi-Fi could read the token and type
+on your laptop. If HTTPS can't start (say, no `openssl`), everything falls
+back to HTTP with a warning. `HYPR_REMOTE_ALLOW_HTTP=1` allows plain HTTP
+anyway.
 
 ### Scenes
 
@@ -110,7 +119,7 @@ sudo firewall-cmd --permanent --add-port=4000/tcp --add-port=4443/tcp && sudo fi
 
 - `src/server.ts` serves the page, a WebSocket, `/screen`, `/upload` and
   `/ca.crt`. Everything except the page, its assets and the certificate needs
-  the pairing token.
+  the pairing token, over HTTPS. It listens on the LAN address only.
 - `src/actions.ts` is the whole list of things the phone can do, validated
   with zod. Commands run with a fixed argv and no shell. Window addresses,
   sound outputs and monitor names are checked against live lists.

@@ -25,6 +25,10 @@ if (params.get("t")) {
 }
 const token = storage("get") ?? params.get("t");
 
+// On plain http: where the secure version is, and whether this page may use
+// the token at all (not once the laptop runs https).
+const config = location.protocol === "http:" ? fetch("/config.json").then((r) => r.json()) : null;
+
 /* -------------------------------------------------------------------------- */
 /* Connection                                                                 */
 /* -------------------------------------------------------------------------- */
@@ -78,6 +82,21 @@ function connect() {
     setTimeout(connect, retry);
     retry = Math.min(retry * 2, 8000);
   };
+}
+
+/** The old http:// address can't pair any more; point at the secure one. */
+function guideToSecure({ address, httpsPort }) {
+  if (!token) return connect(); // shows "not paired"
+  $("status-text").textContent = "offline";
+  showBanner("this is the old http address, which would show your pairing to the whole wi-fi. ");
+  const link = document.createElement("a");
+  link.href = `https://${address}:${httpsPort}/?t=${encodeURIComponent(token)}`;
+  link.textContent = "open the secure version";
+  $("banner").append(
+    link,
+    " or re-scan the qr code. if the browser warns about the certificate, continue anyway, " +
+      "or install the certificate from the bridge tab first.",
+  );
 }
 
 function send(action, { buzz = true } = {}) {
@@ -503,38 +522,60 @@ $("link-open").addEventListener("click", () => {
 });
 
 $("file-pick").addEventListener("click", () => $("file").click());
-$("file").addEventListener("change", () => {
+// One file per request, as the raw body, so the laptop can stream it straight
+// to disk. XHR rather than fetch: it reports upload progress. Resolves to the
+// saved name, or null.
+function uploadFile(file, onProgress) {
+  return new Promise((resolve) => {
+    const request = new XMLHttpRequest();
+    request.upload.onprogress = (event) => onProgress(event.loaded);
+    request.onloadend = () => resolve(request.status === 200 ? JSON.parse(request.responseText).saved : null);
+    request.open("POST", "/upload");
+    request.setRequestHeader("x-token", token);
+    // Header values must be plain ASCII; the laptop decodes it.
+    request.setRequestHeader("x-filename", encodeURIComponent(file.name));
+    request.send(file);
+  });
+}
+
+$("file").addEventListener("change", async () => {
   const files = [...$("file").files];
   if (!files.length) return;
-  const form = new FormData();
-  files.forEach((file) => form.append("file", file));
-
-  // XHR rather than fetch: it reports upload progress.
-  const request = new XMLHttpRequest();
   const bar = $("upload-progress");
   bar.style.display = "block";
-  request.upload.onprogress = (event) => {
-    if (event.lengthComputable) bar.firstElementChild.style.width = `${(event.loaded / event.total) * 100}%`;
-  };
-  request.onloadend = () => {
-    bar.style.display = "none";
-    bar.firstElementChild.style.width = "0";
-    $("file").value = "";
-    if (request.status === 200) {
-      const { saved } = JSON.parse(request.responseText);
-      toast(saved.length === 1 ? `saved ${saved[0]}` : `saved ${saved.length} files`);
-    } else {
-      toast("upload failed");
-    }
-  };
-  request.open("POST", `/upload?t=${encodeURIComponent(token)}`);
-  request.send(form);
+  const total = files.reduce((sum, file) => sum + file.size, 0) || 1;
+  let done = 0;
+  const saved = [];
+  for (const file of files) {
+    const name = await uploadFile(file, (loaded) => {
+      bar.firstElementChild.style.width = `${((done + loaded) / total) * 100}%`;
+    });
+    if (name) saved.push(name);
+    done += file.size;
+  }
+  bar.style.display = "none";
+  bar.firstElementChild.style.width = "0";
+  $("file").value = "";
+  if (!saved.length) toast("upload failed");
+  else if (saved.length < files.length) toast(`saved ${saved.length} of ${files.length} files`);
+  else toast(saved.length === 1 ? `saved ${saved[0]}` : `saved ${saved.length} files`);
 });
 
 // Screen preview: polled only while the bridge tab is open and a monitor is
 // picked, and each frame is requested only after the last one arrived.
 let previewMonitor = null;
 let previewTimer = null;
+// Frames are fetched with the token in a header, not the URL, and shown
+// through object URLs; the previous one is revoked so frames don't pile up.
+let previewUrl = null;
+
+function showFrame(url) {
+  const old = previewUrl;
+  previewUrl = url;
+  if (url) $("screen").src = url;
+  else $("screen").removeAttribute("src");
+  if (old) URL.revokeObjectURL(old);
+}
 
 function renderMonitorPills() {
   document.querySelectorAll("#monitors button").forEach((button) => {
@@ -550,25 +591,47 @@ function updateScreenPolling() {
     if (!previewMonitor) {
       $("screen").hidden = true;
       $("screen-empty").hidden = false;
+      showFrame(null);
     }
     return;
   }
   $("screen-status").textContent = "live";
-  const image = new Image();
-  image.onload = () => {
-    $("screen").src = image.src;
-    $("screen").hidden = false;
-    $("screen-empty").hidden = true;
-    previewTimer = setTimeout(updateScreenPolling, 1200);
-  };
-  image.onerror = () => (previewTimer = setTimeout(updateScreenPolling, 3000));
-  image.src = `/screen?m=${encodeURIComponent(previewMonitor)}&t=${encodeURIComponent(token)}&_=${Date.now()}`;
+  fetch(`/screen?m=${encodeURIComponent(previewMonitor)}`, { headers: { "x-token": token }, cache: "no-store" })
+    .then((response) => {
+      if (!response.ok) throw new Error(`screen: ${response.status}`);
+      return response.blob();
+    })
+    .then((blob) => {
+      // Decoded off-screen first, so the preview never flashes blank.
+      const url = URL.createObjectURL(blob);
+      const image = new Image();
+      image.onload = () => {
+        showFrame(url);
+        $("screen").hidden = false;
+        $("screen-empty").hidden = true;
+        previewTimer = setTimeout(updateScreenPolling, 1200);
+      };
+      image.onerror = () => {
+        URL.revokeObjectURL(url);
+        previewTimer = setTimeout(updateScreenPolling, 3000);
+      };
+      image.src = url;
+    })
+    .catch(() => (previewTimer = setTimeout(updateScreenPolling, 3000)));
 }
 document.addEventListener("visibilitychange", updateScreenPolling);
 
 /* -------------------------------------------------------------------------- */
 /* Install (HTTPS + certificate)                                              */
 /* -------------------------------------------------------------------------- */
+
+// The worker only registers once the phone trusts the laptop's certificate
+// (clicking through the warning isn't enough), and without it the browser
+// won't offer to install.
+const workerReady =
+  "serviceWorker" in navigator && window.isSecureContext
+    ? navigator.serviceWorker.register("/sw.js").then(() => true, () => false)
+    : Promise.resolve(false);
 
 async function renderInstall() {
   const text = $("install-text");
@@ -577,30 +640,37 @@ async function renderInstall() {
     $("install-card").hidden = true;
     return;
   }
-  if (location.protocol === "https:") {
+  if (location.protocol === "https:" && (await workerReady)) {
     text.textContent =
       "open your browser menu and choose “add to home screen” / “install app”.";
     return;
   }
-  const { httpsPort, address } = await fetch("/config.json").then((r) => r.json());
-  text.innerHTML =
-    "installing needs https. do this once:<br>1. download the certificate below.<br>" +
+  const steps =
+    "1. download the certificate below.<br>" +
     "2. android: settings → security → encryption &amp; credentials → install a certificate → ca certificate. " +
-    "iphone: install the profile, then settings → general → about → certificate trust settings → turn it on.<br>" +
-    "3. open the secure version and install from the browser menu.";
+    "iphone: install the profile, then settings → general → about → certificate trust settings → turn it on.<br>";
   const download = document.createElement("a");
   download.href = "/ca.crt";
   download.innerHTML = "<button style='width:100%'>1. download certificate</button>";
+  if (location.protocol === "https:") {
+    text.innerHTML =
+      "installing needs the phone to trust this laptop's certificate. do this once:<br>" +
+      steps +
+      "3. reload this page and install from the browser menu.";
+    actions.replaceChildren(download);
+    return;
+  }
+  const { httpsPort, address } = await config;
+  text.innerHTML =
+    "this is the plain http address. do this once:<br>" +
+    steps +
+    "3. open the secure version and install from the browser menu.";
   const secure = document.createElement("a");
   secure.href = `https://${address}:${httpsPort}/?t=${encodeURIComponent(token ?? "")}`;
   secure.innerHTML = "<button class='primary' style='width:100%'>3. open secure version</button>";
   actions.replaceChildren(download, secure);
 }
 renderInstall().catch(() => {});
-
-if ("serviceWorker" in navigator && window.isSecureContext) {
-  navigator.serviceWorker.register("/sw.js").catch(() => {});
-}
 
 /* -------------------------------------------------------------------------- */
 /* Input: touchpad and keyboard                                               */
@@ -707,4 +777,8 @@ typing.addEventListener("keydown", (event) => {
   }
 });
 
-connect();
+if (config) {
+  config.then((c) => (c.httpAllowed ? connect() : guideToSecure(c))).catch(connect);
+} else {
+  connect();
+}
