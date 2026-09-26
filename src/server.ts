@@ -10,6 +10,7 @@ import { lanAddress, loadToken, publishPairing, tokenMatches } from "./pairing";
 import { loadScenes } from "./scenes";
 import { readFast, readSlow, type FastState, type SlowState } from "./state";
 import { CA_CERT, ensureCertificate } from "./tls";
+import { watchAudioAndMedia } from "./watch";
 
 const HTTP_PORT = Number(process.env.PORT ?? 4000);
 const HTTPS_PORT = Number(process.env.HTTPS_PORT ?? 4443);
@@ -112,8 +113,12 @@ async function followHyprland() {
   }
 }
 
-setInterval(() => void refresh("fast"), 1500);
-setInterval(() => void refresh("slow"), 4000);
+// Volume, sound output and media arrive live too, while a phone is connected.
+const audioAndMedia = watchAudioAndMedia((stale) => void refresh(stale));
+
+// Only a fallback now: events cover what changes fast.
+setInterval(() => void refresh("fast"), 5000);
+setInterval(() => void refresh("slow"), 10_000);
 void followHyprland();
 
 /* -------------------------------------------------------------------------- */
@@ -126,6 +131,7 @@ const STATIC_TYPES: Record<string, string> = {
   ".webmanifest": "application/manifest+json",
   ".png": "image/png",
   ".svg": "image/svg+xml",
+  ".woff2": "font/woff2",
 };
 
 /** Files from public/, and nothing that resolves outside it. */
@@ -140,8 +146,8 @@ async function serveStatic(pathname: string): Promise<Response | null> {
   return new Response(file, {
     headers: {
       "Content-Type": type,
-      // The page and worker must never be stale; icons may be cached.
-      "Cache-Control": type.startsWith("image/") ? "max-age=86400" : "no-store",
+      // The page and worker must never be stale; icons and fonts may be cached.
+      "Cache-Control": type.startsWith("image/") || type.startsWith("font/") ? "max-age=86400" : "no-store",
     },
   });
 }
@@ -207,11 +213,13 @@ async function handle(request: Request, server: Server<undefined>): Promise<Resp
 const websocket = {
   open(socket: ServerWebSocket<undefined>) {
     clients.add(socket);
+    audioAndMedia.start();
     // A fresh phone needs a full picture now, not on the next tick.
     void refresh("both").then(() => broadcast(true));
   },
   close(socket: ServerWebSocket<undefined>) {
     clients.delete(socket);
+    if (clients.size === 0) audioAndMedia.stop();
   },
   async message(socket: ServerWebSocket<undefined>, raw: string | Buffer) {
     let json: unknown;

@@ -11,6 +11,19 @@ import { run } from "../src/run";
 const UNIT_DIR = join(homedir(), ".config", "systemd", "user");
 const server = resolve(import.meta.dir, "..", "src", "server.ts");
 
+/**
+ * One ExecStart argument, quoted so a path with spaces stays one argument and
+ * a `%` or `$` in it isn't read as a specifier or variable.
+ */
+function unitArg(value: string): string {
+  const escaped = value
+    .replaceAll("\\", "\\\\")
+    .replaceAll('"', '\\"')
+    .replaceAll("%", "%%")
+    .replaceAll("$", () => "$$");
+  return `"${escaped}"`;
+}
+
 const remoteUnit = `[Unit]
 Description=hypr-remote: control Hyprland from your phone
 After=graphical-session.target
@@ -18,7 +31,7 @@ After=graphical-session.target
 StartLimitIntervalSec=0
 
 [Service]
-ExecStart=${process.execPath} ${server}
+ExecStart=${unitArg(process.execPath)} ${unitArg(server)}
 Restart=always
 RestartSec=3
 
@@ -32,7 +45,7 @@ const ydotoolUnit = (binary: string) => `[Unit]
 Description=ydotoold for hypr-remote clicks and scrolling
 
 [Service]
-ExecStart=${binary} --socket-path=%t/.ydotool_socket --socket-perm=0600
+ExecStart=${unitArg(binary)} --socket-path=%t/.ydotool_socket --socket-perm=0600
 Restart=on-failure
 RestartSec=3
 
@@ -54,7 +67,7 @@ if (ydotoold) {
   await Bun.write(join(UNIT_DIR, "ydotoold.service"), ydotoolUnit(ydotoold));
   units.unshift("ydotoold.service");
 } else {
-  console.log("ydotoold not found: clicks and scrolling stay off. `sudo dnf install ydotool`, then re-run.");
+  console.log("ydotoold not found: clicks and scrolling stay off. Install ydotool (see the README), then re-run.");
 }
 
 await systemctl("daemon-reload");
