@@ -61,6 +61,8 @@ hide it; that's remembered on the phone too.
 
 ![The four tabs: desk, control, bridge and input](docs/tabs.webp)
 
+![The notifications list, the full player, and the general and desk tabs of settings](docs/settings.webp)
+
 ## Run
 
 ```bash
@@ -102,8 +104,6 @@ bun run install-service   # adds a ydotoold user service
 
 The udev rule lets every member of the `input` group create virtual input
 devices, which means any program running as your user can inject keystrokes.
-
-![The bridge tab with a live screen preview and system stats, and the input tab with the touchpad and keyboard](docs/bridge-input.webp)
 
 ### Brightness of external screens
 
