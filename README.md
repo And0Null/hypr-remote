@@ -7,7 +7,7 @@ web page, installable as an app, with four tabs:
   open the laptop's menu); workspaces in use, each with the app on it (swipe to switch, hold
   one to move the focused window there); the window list (tap to focus, swipe
   left to close, hold to drag onto a workspace or for fullscreen, float and
-  force kill); media with album art, seeking and volume; and a dock on the
+  force kill); and a dock on the
   right edge to shut down, restart, sleep or lock (hold one until the colour
   spreading from it fills the dock).
 - **control**: scenes (tap again to undo, hold to save what's on now); volume
@@ -20,8 +20,10 @@ web page, installable as an app, with four tabs:
   copied); links open on the laptop; files go to `~/Downloads` and open
   there, and the latest screenshot and downloads come back to the phone; a
   live preview of the screen, which opens full size to zoom in and click.
-- System stats sit above the tab bar on every tab; tap one for its last ten
-  minutes, and for CPU and memory the busiest apps (hold one to quit it).
+- While something plays, a mini player floats over the tab bar on every tab
+  (tap it for album art, seeking, ±10 seconds and volume). System stats sit
+  small just above the tab bar; tap one for its last ten minutes, and for CPU
+  and memory the busiest apps (hold one to quit it).
 - **input**: a touchpad filling the screen (tap to click, double-tap and
   hold to drag, two fingers to scroll either way or pinch to zoom, three to
   swipe between workspaces), with pointer speed matched to the size of your

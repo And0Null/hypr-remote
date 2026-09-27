@@ -204,7 +204,7 @@ function wireTabSwipe() {
   // are theirs too.
   const OWN_SWIPE = [
     "#workspaces-card, .window, input, textarea, [data-card-handle], .pad",
-    "#viewer, #presenter, #dock, #sheet, #sheet-backdrop, #drop-strip, #power-deck",
+    "#viewer, #presenter, #dock, #sheet, #media-sheet, #sheet-backdrop, #drop-strip, #power-deck",
   ].join(", ");
   const names = [...document.querySelectorAll("[role=tab]")].map((tab) => /** @type {HTMLElement} */ (tab).dataset.tab);
   /** @type {{ x: number; y: number; at: number } | null} */
@@ -789,7 +789,7 @@ function moveFocusedTo(id) {
 /* Desk: windows                                                              */
 /* -------------------------------------------------------------------------- */
 
-// Enough for most desks, and short enough to keep media in reach.
+// Enough for most desks, and short enough to fit on a phone screen.
 const WINDOW_CAP = 6;
 
 // The list is rebuilt only when what it shows changes, and never while a
@@ -1083,7 +1083,7 @@ function endDrag(drop) {
 }
 
 /* -------------------------------------------------------------------------- */
-/* Desk: media                                                                */
+/* Media: the mini player over the tab bar, and its sheet                     */
 /* -------------------------------------------------------------------------- */
 
 /**
@@ -1105,8 +1105,17 @@ function renderMedia() {
   $("media-status").textContent = media?.status ? `${media.status} · ${media.player}` : "nothing playing";
   $("media-title").textContent = media?.title || "—";
   $("media-artist").textContent = media?.artist || " ";
-  $("play-icon").innerHTML =
-    media?.status === "Playing" ? '<path d="M7 5h4v14H7zM13 5h4v14h-4z" />' : '<path d="M8 5v14l11-7z" />';
+  const icon = media?.status === "Playing" ? '<path d="M7 5h4v14H7zM13 5h4v14h-4z" />' : '<path d="M8 5v14l11-7z" />';
+  $("play-icon").innerHTML = icon;
+  $("player-play-icon").innerHTML = icon;
+
+  // The player shows while a player has something loaded, playing or paused.
+  const showing = Boolean(media?.status);
+  $("player").hidden = !showing;
+  document.body.dataset.playing = String(showing);
+  if (!showing && !$("media-sheet").hidden) closeSheet();
+  $("player-title").textContent = media?.title || media?.player || "";
+  $("player-artist").textContent = media?.artist || media?.status?.toLowerCase() || "";
 
   mediaClock = { position: media?.position ?? 0, at: performance.now(), playing: media?.status === "Playing" };
   const seek = /** @type {HTMLInputElement} */ ($("media-seek"));
@@ -1135,7 +1144,7 @@ function tickMedia() {
   setSlider("media-seek", Math.round(elapsed));
 }
 setInterval(() => {
-  if (state && document.visibilityState === "visible" && $("tab-desk").dataset.active === "true") tickMedia();
+  if (state && document.visibilityState === "visible" && !$("media-sheet").hidden) tickMedia();
 }, 500);
 
 // Seeking waits for the finger to lift: one jump, not one per pixel.
@@ -1164,14 +1173,16 @@ let artUrl = null;
 function loadArt(key) {
   if (key === artKey) return;
   artKey = key;
-  const image = /** @type {HTMLImageElement} */ ($("media-art"));
+  const images = /** @type {HTMLImageElement[]} */ ([$("media-art"), $("player-art")]);
   /** @param {string | null} url */
   const show = (url) => {
     if (artUrl) URL.revokeObjectURL(artUrl);
     artUrl = url;
-    image.hidden = !url;
-    if (url) image.src = url;
-    else image.removeAttribute("src");
+    for (const image of images) {
+      image.hidden = !url;
+      if (url) image.src = url;
+      else image.removeAttribute("src");
+    }
   };
   if (!key) return show(null);
   fetch(`/art?k=${encodeURIComponent(key)}`, { headers: { "x-token": token ?? "" } })
@@ -2568,6 +2579,7 @@ let touchingTop = false;
 
 /** @param {NonNullable<typeof sheet>} next */
 function openSheet(next) {
+  $("media-sheet").hidden = true;
   sheet = next;
   sheetKey = "";
   topApps = null;
@@ -2586,9 +2598,19 @@ function closeSheet() {
   sheet = null;
   clearInterval(topTimer);
   $("sheet").hidden = true;
+  $("media-sheet").hidden = true;
   $("sheet-backdrop").hidden = true;
 }
 $("sheet-backdrop").addEventListener("click", closeSheet);
+
+// The full player: art, seeking, ±10 seconds and volume.
+$("player-open").addEventListener("click", () => {
+  if (!$("media-sheet").hidden) return closeSheet();
+  closeSheet();
+  $("media-sheet").hidden = false;
+  $("sheet-backdrop").hidden = false;
+  tickMedia();
+});
 
 /**
  * A stat's figure, the words after it, and the range its graph spans.

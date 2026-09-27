@@ -35,7 +35,11 @@
         --dot: "Geist", system-ui, sans-serif;
         --mono: "Geist", system-ui, sans-serif;
         /* The tab bar and the stats strip above it. */
-        --nav: 7.9rem;
+        /* The black band (stats and tabs), and the mini player over its top. */
+        --nav-base: 7rem;
+        --player-height: 4rem;
+        --player-overlap: 2rem;
+        --nav: var(--nav-base);
         /* How far the power dock reaches in from the right, over the desk. */
         --deck: 3.75rem;
         /* Frosted glass, for what floats over the page. */
@@ -46,6 +50,11 @@
       * {
         box-sizing: border-box;
         -webkit-tap-highlight-color: transparent;
+      }
+
+      /* The page stops above the mini player while it shows. */
+      body[data-playing="true"] {
+        --nav: calc(var(--nav-base) + var(--player-height) - 0.3rem);
       }
 
       html,
@@ -907,13 +916,12 @@
         }
       }
 
-      /* Stats, floating above the tab bar on every tab. */
+      /* Stats, small, on the black band above the tab bar on every tab. */
       .stats-strip {
         display: flex;
         justify-content: space-between;
-        width: min(100%, 28rem);
-        padding: 0.1rem 0.5rem;
-        border-radius: 999px;
+        width: min(100%, 26rem);
+        padding: 0 0.5rem;
       }
 
       .stats-strip button {
@@ -922,10 +930,10 @@
         gap: 0.3rem;
         /* Padding, not a min-height: baseline-aligned text sits at the top. */
         min-height: 0;
-        padding: 0.55rem 0.35rem;
+        padding: 0.4rem 0.3rem;
         border: 0;
         background: transparent;
-        font-size: 0.72rem;
+        font-size: 0.62rem;
       }
 
       .stats-strip span {
@@ -1487,19 +1495,31 @@
         display: flex;
         flex-direction: column;
         align-items: center;
-        gap: 0.4rem;
-        padding: 0.6rem 1rem calc(1rem + env(safe-area-inset-bottom));
-        /* The page shows between and around the pills, and takes touches there. */
+        padding: 0 1rem;
+        /* The page shows around the player, and takes touches there. */
         pointer-events: none;
       }
 
       nav > * {
         pointer-events: auto;
-        background: var(--glass);
-        border: 1px solid var(--glass-line);
-        -webkit-backdrop-filter: blur(1.25rem) saturate(1.8);
-        backdrop-filter: blur(1.25rem) saturate(1.8);
-        box-shadow: 0 0.75rem 2rem rgb(0 0 0 / 0.45);
+      }
+
+      /* Solid black from halfway down the player to the bottom edge, with a
+         short fade above so cards don't end on a hard line. */
+      .nav-base {
+        align-self: stretch;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        gap: 0.2rem;
+        margin: 0 -1rem;
+        padding: 0.5rem 1rem calc(1rem + env(safe-area-inset-bottom));
+        background: var(--bg);
+        box-shadow: 0 -0.75rem 0.75rem -0.25rem var(--bg);
+      }
+
+      .player:not([hidden]) + .nav-base {
+        padding-top: calc(var(--player-overlap) + 0.2rem);
       }
 
       nav [role="tablist"] {
@@ -1510,6 +1530,118 @@
         padding: 0.3rem;
         border-radius: 999px;
         position: relative;
+        background: var(--glass);
+        border: 1px solid var(--glass-line);
+        -webkit-backdrop-filter: blur(1.25rem) saturate(1.8);
+        backdrop-filter: blur(1.25rem) saturate(1.8);
+      }
+
+      /* The mini player: art, title and artist (tap for the full player),
+         then previous, play and next. */
+      .player {
+        position: relative;
+        z-index: 1;
+        display: grid;
+        grid-template-columns: 1fr auto auto auto;
+        align-items: center;
+        gap: 0.45rem;
+        width: min(100%, 28rem);
+        height: var(--player-height);
+        margin-bottom: calc(-1 * var(--player-overlap));
+        padding: 0 0.55rem 0 0.5rem;
+        border-radius: 1.6rem;
+        background: #232323;
+        border: 1px solid var(--line);
+        box-shadow: 0 0.75rem 2rem rgb(0 0 0 / 0.5);
+      }
+
+      .player-open {
+        display: grid;
+        grid-template-columns: auto 1fr;
+        align-items: center;
+        gap: 0.75rem;
+        min-width: 0;
+        min-height: 0;
+        padding: 0;
+        border: 0;
+        background: transparent;
+        text-align: left;
+      }
+
+      .player-open:active {
+        background: transparent;
+      }
+
+      .player-art {
+        display: grid;
+        place-items: center;
+        width: 2.9rem;
+        height: 2.9rem;
+        border-radius: 50%;
+        overflow: hidden;
+        background: var(--raised);
+        color: var(--muted);
+      }
+
+      .player-art img {
+        width: 100%;
+        height: 100%;
+        object-fit: cover;
+      }
+
+      .player-art svg {
+        width: 1.2rem;
+        height: 1.2rem;
+      }
+
+      .player-art img:not([hidden]) + svg {
+        display: none;
+      }
+
+      .player-text {
+        display: grid;
+        gap: 0.15rem;
+        min-width: 0;
+      }
+
+      .player-title {
+        font-size: 0.95rem;
+        font-weight: 600;
+        color: var(--fg);
+      }
+
+      .player-artist {
+        font-size: 0.8rem;
+        color: var(--muted);
+      }
+
+      .player-button {
+        display: grid;
+        place-items: center;
+        width: 2.6rem;
+        height: 2.6rem;
+        min-height: 0;
+        padding: 0;
+        border: 0;
+        border-radius: 50%;
+        background: #161616;
+        color: var(--fg);
+      }
+
+      .player-button svg {
+        width: 1.1rem;
+        height: 1.1rem;
+      }
+
+      .player-play {
+        width: 2.9rem;
+        height: 2.9rem;
+        background: #c4c4c4;
+        color: #111;
+      }
+
+      .player-play:active {
+        background: #a8a8a8;
       }
 
       /* The white pill under the open tab, sliding from one tab to the next. */
@@ -1663,40 +1795,6 @@
           <div class="windows" id="windows"></div>
           <button class="more" id="windows-more" hidden></button>
           <p class="hint">tap to focus · swipe left to close · hold to drag onto a workspace, or for more</p>
-        </div>
-
-        <div class="card" data-card="media">
-          <div class="media-head">
-            <div class="art"><img id="media-art" alt="" hidden /></div>
-            <div style="min-width: 0">
-              <p class="label truncate" id="media-status" data-card-handle>nothing playing</p>
-              <p class="truncate" id="media-title" style="margin: 0.4rem 0 0; font-size: 1.05rem">—</p>
-              <p class="label truncate" id="media-artist" style="margin-top: 0.25rem">&nbsp;</p>
-            </div>
-          </div>
-          <input type="range" id="media-seek" min="0" max="1" value="0" aria-label="position in track" disabled />
-          <div class="row times">
-            <span class="label" id="media-elapsed">--:--</span>
-            <span class="label" id="media-length">--:--</span>
-          </div>
-          <div class="media-controls">
-            <button aria-label="back 10 seconds" data-action='{"type":"media-skip","by":-10}'>−10</button>
-            <button aria-label="previous track" data-action='{"type":"media","command":"previous"}'>
-              <svg viewBox="0 0 24 24" fill="currentColor"><path d="M6 5h2v14H6zM20 5v14L9 12z" /></svg>
-            </button>
-            <button class="primary" aria-label="play or pause" data-action='{"type":"media","command":"play-pause"}'>
-              <svg viewBox="0 0 24 24" fill="currentColor" id="play-icon"><path d="M8 5v14l11-7z" /></svg>
-            </button>
-            <button aria-label="next track" data-action='{"type":"media","command":"next"}'>
-              <svg viewBox="0 0 24 24" fill="currentColor"><path d="M16 5h2v14h-2zM4 5v14l11-7z" /></svg>
-            </button>
-            <button aria-label="forward 10 seconds" data-action='{"type":"media-skip","by":10}'>+10</button>
-          </div>
-          <div class="media-volume">
-            <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M4 9h4l5-4v14l-5-4H4zM16 8.5a5 5 0 0 1 0 7l-1.4-1.4a3 3 0 0 0 0-4.2z" /></svg>
-            <input type="range" id="media-volume" min="0" max="100" aria-label="volume" />
-            <span class="label" id="media-volume-level">--</span>
-          </div>
         </div>
       </section>
 
@@ -1924,6 +2022,41 @@
       </div>
     </div>
 
+    <!-- Everything the mini player has no room for: tap it to open. -->
+    <div class="sheet media-sheet" id="media-sheet" hidden>
+      <div class="media-head">
+        <div class="art"><img id="media-art" alt="" hidden /></div>
+        <div style="min-width: 0">
+          <p class="label truncate" id="media-status">nothing playing</p>
+          <p class="truncate" id="media-title" style="margin: 0.4rem 0 0; font-size: 1.05rem">—</p>
+          <p class="label truncate" id="media-artist" style="margin-top: 0.25rem">&nbsp;</p>
+        </div>
+      </div>
+      <input type="range" id="media-seek" min="0" max="1" value="0" aria-label="position in track" disabled />
+      <div class="row times">
+        <span class="label" id="media-elapsed">--:--</span>
+        <span class="label" id="media-length">--:--</span>
+      </div>
+      <div class="media-controls">
+        <button aria-label="back 10 seconds" data-action='{"type":"media-skip","by":-10}'>−10</button>
+        <button aria-label="previous track" data-action='{"type":"media","command":"previous"}'>
+          <svg viewBox="0 0 24 24" fill="currentColor"><path d="M6 5h2v14H6zM20 5v14L9 12z" /></svg>
+        </button>
+        <button class="primary" aria-label="play or pause" data-action='{"type":"media","command":"play-pause"}'>
+          <svg viewBox="0 0 24 24" fill="currentColor" id="play-icon"><path d="M8 5v14l11-7z" /></svg>
+        </button>
+        <button aria-label="next track" data-action='{"type":"media","command":"next"}'>
+          <svg viewBox="0 0 24 24" fill="currentColor"><path d="M16 5h2v14h-2zM4 5v14l11-7z" /></svg>
+        </button>
+        <button aria-label="forward 10 seconds" data-action='{"type":"media-skip","by":10}'>+10</button>
+      </div>
+      <div class="media-volume">
+        <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M4 9h4l5-4v14l-5-4H4zM16 8.5a5 5 0 0 1 0 7l-1.4-1.4a3 3 0 0 0 0-4.2z" /></svg>
+        <input type="range" id="media-volume" min="0" max="100" aria-label="volume" />
+        <span class="label" id="media-volume-level">--</span>
+      </div>
+    </div>
+
     <div class="sheet-backdrop" id="sheet-backdrop" hidden></div>
     <div class="sheet" id="sheet" hidden></div>
 
@@ -1939,18 +2072,43 @@
     </div>
 
     <nav>
-      <div class="stats-strip" id="stats-strip">
-        <button data-stat="cpu"><span>cpu</span><b id="strip-cpu">--</b></button>
-        <button data-stat="memory"><span>ram</span><b id="strip-memory">--</b></button>
-        <button data-stat="battery" id="strip-battery-button"><span id="strip-battery-label">bat</span><b id="strip-battery">--</b></button>
-        <button data-stat="temperature"><span>temp</span><b id="strip-temperature">--</b></button>
-        <button data-stat="disk"><span>disk</span><b id="strip-disk">--</b></button>
+      <!-- What's playing, on every tab; hidden when nothing is. -->
+      <div class="player" id="player" hidden>
+        <button class="player-open" id="player-open" aria-label="open the player">
+          <span class="player-art">
+            <img id="player-art" alt="" hidden />
+            <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M9 17.5V6l10-2v11.5a2.5 2.5 0 1 1-2-2.45V7.4l-6 1.2v8.9a2.5 2.5 0 1 1-2-2.45z" /></svg>
+          </span>
+          <span class="player-text">
+            <span class="player-title truncate" id="player-title"></span>
+            <span class="player-artist truncate" id="player-artist"></span>
+          </span>
+        </button>
+        <button class="player-button" aria-label="previous track" data-action='{"type":"media","command":"previous"}'>
+          <svg viewBox="0 0 24 24" fill="currentColor"><path d="M6 5h2v14H6zM20 5v14L9 12z" /></svg>
+        </button>
+        <button class="player-button player-play" aria-label="play or pause" data-action='{"type":"media","command":"play-pause"}'>
+          <svg viewBox="0 0 24 24" fill="currentColor" id="player-play-icon"><path d="M8 5v14l11-7z" /></svg>
+        </button>
+        <button class="player-button" aria-label="next track" data-action='{"type":"media","command":"next"}'>
+          <svg viewBox="0 0 24 24" fill="currentColor"><path d="M16 5h2v14h-2zM4 5v14l11-7z" /></svg>
+        </button>
       </div>
-      <div role="tablist">
-        <button role="tab" data-tab="desk" aria-selected="true">desk</button>
-        <button role="tab" data-tab="control" aria-selected="false">control</button>
-        <button role="tab" data-tab="bridge" aria-selected="false">bridge</button>
-        <button role="tab" data-tab="input" aria-selected="false">input</button>
+      <!-- Solid black from the player down: stats, then the tabs. -->
+      <div class="nav-base">
+        <div class="stats-strip" id="stats-strip">
+          <button data-stat="cpu"><span>cpu</span><b id="strip-cpu">--</b></button>
+          <button data-stat="memory"><span>ram</span><b id="strip-memory">--</b></button>
+          <button data-stat="battery" id="strip-battery-button"><span id="strip-battery-label">bat</span><b id="strip-battery">--</b></button>
+          <button data-stat="temperature"><span>temp</span><b id="strip-temperature">--</b></button>
+          <button data-stat="disk"><span>disk</span><b id="strip-disk">--</b></button>
+        </div>
+        <div role="tablist">
+          <button role="tab" data-tab="desk" aria-selected="true">desk</button>
+          <button role="tab" data-tab="control" aria-selected="false">control</button>
+          <button role="tab" data-tab="bridge" aria-selected="false">bridge</button>
+          <button role="tab" data-tab="input" aria-selected="false">input</button>
+        </div>
       </div>
     </nav>
 
