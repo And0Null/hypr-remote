@@ -30,6 +30,8 @@
         --muted: #8a8a8a;
         --faint: #5a5a5a;
         --red: #d71921;
+        /* The one colour: red unless the phone picked another (tap the title). */
+        --accent: var(--red);
         --dot: "Geist", system-ui, sans-serif;
         --mono: "Geist", system-ui, sans-serif;
         /* The tab bar and the stats strip above it. */
@@ -284,8 +286,8 @@
       }
 
       .workspaces button[data-active="true"] {
-        background: var(--red);
-        border-color: var(--red);
+        background: var(--accent);
+        border-color: var(--accent);
         color: var(--fg);
       }
 
@@ -442,6 +444,43 @@
       .window-menu button[data-armed="true"] {
         background: var(--red);
         border-color: var(--red);
+      }
+
+      /* Hold a card's title to move or hide it. */
+      [data-card-handle] {
+        -webkit-touch-callout: none;
+      }
+
+      .card[data-away="true"] {
+        display: none;
+      }
+
+      .card[data-lifted="true"] {
+        position: relative;
+        z-index: 5;
+        border-color: var(--accent);
+        box-shadow: 0 1rem 2.5rem rgb(0 0 0 / 0.7);
+      }
+
+      .card-menu {
+        grid-template-columns: repeat(auto-fit, minmax(0, 1fr));
+        margin-top: 0.75rem;
+        /* Clear of the stats strip and tab bar when scrolled into view. */
+        scroll-margin-bottom: calc(var(--nav) + env(safe-area-inset-bottom) + 1rem);
+      }
+
+      .restore {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: center;
+        gap: 0.4rem;
+      }
+
+      .restore button {
+        min-height: 2.4rem;
+        padding: 0 0.9rem;
+        font-size: 0.75rem;
+        border-radius: 999px;
       }
 
       .more {
@@ -650,7 +689,7 @@
       .hold .fill {
         position: absolute;
         inset: 0;
-        background: var(--red);
+        background: var(--accent);
         transform-origin: left;
         transform: scaleX(0);
       }
@@ -1523,7 +1562,7 @@
   <body>
     <main>
       <header>
-        <span id="title">hypr-remote</span>
+        <span id="title" role="button" aria-label="hypr-remote. tap to change the colour">hypr-remote</span>
         <button class="radio-pill install-pill" id="install-pill" hidden>
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 4v11M7 10l5 5 5-5M5 20h14" /></svg>
           <span>install app</span>
@@ -1548,10 +1587,10 @@
       <!-- desk                                                             -->
       <!-- ================================================================ -->
       <section class="tab" id="tab-desk" data-active="true">
-        <div class="card" id="workspaces-card">
+        <div class="card" id="workspaces-card" data-card="workspaces">
           <div class="row">
             <div style="min-width: 0">
-              <p class="label">workspace</p>
+              <p class="label" data-card-handle>workspace</p>
               <p class="label truncate" id="window" style="margin-top: 0.35rem; color: var(--fg)">—</p>
             </div>
             <span class="dot" id="workspace" style="font-size: 3.8rem">--</span>
@@ -1560,9 +1599,9 @@
           <p class="hint">swipe to switch · hold one to move the focused window there</p>
         </div>
 
-        <div class="card">
+        <div class="card" data-card="windows">
           <div class="row">
-            <p class="label">windows</p>
+            <p class="label" data-card-handle>windows</p>
             <p class="label" id="window-count"></p>
           </div>
           <div class="windows" id="windows"></div>
@@ -1570,11 +1609,11 @@
           <p class="hint">tap to focus · swipe left to close · hold to drag onto a workspace, or for more</p>
         </div>
 
-        <div class="card">
+        <div class="card" data-card="media">
           <div class="media-head">
             <div class="art"><img id="media-art" alt="" hidden /></div>
             <div style="min-width: 0">
-              <p class="label truncate" id="media-status">nothing playing</p>
+              <p class="label truncate" id="media-status" data-card-handle>nothing playing</p>
               <p class="truncate" id="media-title" style="margin: 0.4rem 0 0; font-size: 1.05rem">—</p>
               <p class="label truncate" id="media-artist" style="margin-top: 0.25rem">&nbsp;</p>
             </div>
@@ -1609,15 +1648,15 @@
       <!-- control                                                          -->
       <!-- ================================================================ -->
       <section class="tab" id="tab-control">
-        <div class="card">
-          <p class="label">scenes</p>
+        <div class="card" data-card="scenes">
+          <p class="label" data-card-handle>scenes</p>
           <div class="grid-2 scenes" id="scenes" style="margin-top: 1rem"></div>
           <p class="hint">tap to apply, again to undo · hold to save what's on now into it</p>
         </div>
 
-        <div class="card">
+        <div class="card" data-card="volume">
           <div class="row">
-            <p class="label" id="volume-label">volume</p>
+            <p class="label" id="volume-label" data-card-handle>volume</p>
             <span class="dot" id="volume" style="font-size: 2.4rem">--</span>
           </div>
           <input type="range" id="volume-slider" min="0" max="100" aria-label="volume" />
@@ -1642,9 +1681,9 @@
           <div class="apps" id="apps" hidden></div>
         </div>
 
-        <div class="card">
+        <div class="card" data-card="brightness">
           <div class="row">
-            <p class="label">brightness</p>
+            <p class="label" data-card-handle>brightness</p>
             <span class="dot" id="brightness" style="font-size: 2.4rem">--</span>
           </div>
           <div id="screens"></div>
@@ -1662,9 +1701,9 @@
           </div>
         </div>
 
-        <div class="card">
+        <div class="card" data-card="notifications">
           <div class="row">
-            <p class="label">notifications</p>
+            <p class="label" data-card-handle>notifications</p>
             <p class="label" id="notification-count"></p>
           </div>
           <div id="notifications-body">
@@ -1683,8 +1722,8 @@
           <p class="hint" id="notifications-missing" hidden>no notification daemon found: swaync, mako or dunst.</p>
         </div>
 
-        <div class="card">
-          <p class="label">power</p>
+        <div class="card" data-card="power">
+          <p class="label" data-card-handle>power</p>
           <div class="power">
             <button class="hold" id="lock" data-hold='{"type":"lock"}' aria-label="hold to lock the screen">
               <span class="fill"></span><span>lock</span>
@@ -1713,9 +1752,9 @@
       <!-- bridge                                                           -->
       <!-- ================================================================ -->
       <section class="tab" id="tab-bridge">
-        <div class="card">
+        <div class="card" data-card="clipboard">
           <div class="row">
-            <p class="label">clipboard</p>
+            <p class="label" data-card-handle>clipboard</p>
             <p class="label">tap one to copy it to your phone</p>
           </div>
           <div class="clips" id="clip-now"></div>
@@ -1728,8 +1767,8 @@
           </div>
         </div>
 
-        <div class="card">
-          <p class="label">files</p>
+        <div class="card" data-card="files">
+          <p class="label" data-card-handle>files</p>
           <div class="stack">
             <button class="primary" id="file-pick">send files to laptop</button>
           </div>
@@ -1749,9 +1788,9 @@
           </div>
         </div>
 
-        <div class="card">
+        <div class="card" data-card="screen">
           <div class="row">
-            <p class="label">screen</p>
+            <p class="label" data-card-handle>screen</p>
             <p class="label" id="screen-status">paused</p>
           </div>
           <div class="pills" id="monitors"></div>

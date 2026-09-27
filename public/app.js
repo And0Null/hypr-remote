@@ -171,18 +171,333 @@ function showTab(name) {
     section.dataset.active = String(section.id === `tab-${name}`);
   });
   document.body.dataset.tab = name;
-  try {
-    localStorage.setItem("hypr-remote-tab", name);
-  } catch {}
   updateScreenPolling();
 }
 
 /** @type {NodeListOf<HTMLElement>} */ (document.querySelectorAll("[role=tab]")).forEach((tab) =>
   tab.addEventListener("click", () => showTab(/** @type {string} */ (tab.dataset.tab))),
 );
+// Always opens on desk, the home screen, as index.html is written. (Screen
+// polling starts once the page is set up.)
+document.body.dataset.tab = "desk";
 try {
-  showTab(localStorage.getItem("hypr-remote-tab") ?? "desk");
+  localStorage.removeItem("hypr-remote-tab");
 } catch {}
+
+/* -------------------------------------------------------------------------- */
+/* Cards: this phone's order, the ones put away, and the colour               */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * Remembered on this phone only. `order` lists each tab's cards top to bottom;
+ * cards added in a later version, missing from it, keep their place at the end.
+ * @typedef {{ order: Record<string, string[]>; away: string[] }} Layout
+ */
+const LAYOUT_KEY = "hypr-remote-cards";
+
+/** @returns {Layout} */
+function readLayout() {
+  try {
+    const saved = JSON.parse(localStorage.getItem(LAYOUT_KEY) ?? "null");
+    if (saved && typeof saved.order === "object" && Array.isArray(saved.away)) return saved;
+  } catch {}
+  return { order: {}, away: [] };
+}
+
+let layout = readLayout();
+
+function saveLayout() {
+  try {
+    localStorage.setItem(LAYOUT_KEY, JSON.stringify(layout));
+  } catch {}
+}
+
+/** @param {Element} tab */
+const cardsOf = (tab) => /** @type {HTMLElement[]} */ ([...tab.querySelectorAll(":scope > [data-card]")]);
+const cardName = (/** @type {HTMLElement} */ card) => /** @type {string} */ (card.dataset.card);
+
+// The order they're written in, for "reset order".
+/** @type {Record<string, string[]>} */
+const defaultOrder = {};
+document.querySelectorAll(".tab").forEach((tab) => (defaultOrder[tab.id] = cardsOf(tab).map(cardName)));
+
+function applyLayout() {
+  document.querySelectorAll(".tab").forEach((tab) => {
+    const cards = cardsOf(tab);
+    if (!cards.length) return;
+    const saved = layout.order[tab.id] ?? [];
+    const first = defaultOrder[tab.id] ?? [];
+    const rank = (/** @type {HTMLElement} */ card) => {
+      const at = saved.indexOf(cardName(card));
+      return at === -1 ? saved.length + first.indexOf(cardName(card)) : at;
+    };
+    const sorted = [...cards].sort((a, b) => rank(a) - rank(b));
+    for (const card of sorted) {
+      card.dataset.away = String(layout.away.includes(cardName(card)));
+      tab.append(card);
+    }
+    tab.append(restoreRow(tab, sorted));
+  });
+}
+
+/**
+ * The cards put away on this tab, one button each to bring it back.
+ * @param {Element} tab
+ * @param {HTMLElement[]} cards
+ */
+function restoreRow(tab, cards) {
+  const row = tab.querySelector(":scope > .restore") ?? document.createElement("div");
+  row.className = "restore";
+  const away = cards.filter((card) => card.dataset.away === "true");
+  row.toggleAttribute("hidden", !away.length);
+  const label = document.createElement("span");
+  label.className = "label";
+  label.textContent = "hidden:";
+  row.replaceChildren(
+    label,
+    ...away.map((card) => {
+      const button = document.createElement("button");
+      button.textContent = `show ${cardName(card)}`;
+      button.addEventListener("click", () => {
+        layout.away = layout.away.filter((name) => name !== cardName(card));
+        saveLayout();
+        applyLayout();
+      });
+      return button;
+    }),
+  );
+  return row;
+}
+
+/**
+ * Moves siblings to their new places smoothly: each starts where it was and
+ * slides to where the reorder put it.
+ * @param {HTMLElement[]} cards
+ * @param {() => void} reorder
+ */
+function slideCards(cards, reorder) {
+  const before = new Map(cards.map((card) => [card, card.getBoundingClientRect().top]));
+  reorder();
+  for (const card of cards) {
+    if (card.dataset.lifted === "true") continue;
+    const shift = /** @type {number} */ (before.get(card)) - card.getBoundingClientRect().top;
+    if (!shift) continue;
+    card.animate([{ transform: `translateY(${shift}px)` }, { transform: "none" }], {
+      duration: 180,
+      easing: "ease-out",
+    });
+  }
+}
+
+/**
+ * Puts `card` just before `target` by moving the cards between them: taking
+ * the held card out of the page, even for a moment, loses the finger.
+ * @param {HTMLElement} card
+ * @param {Element | null} target
+ */
+function moveAround(card, target) {
+  /** @type {Element[]} */
+  const between = [];
+  if (target && card.compareDocumentPosition(target) & Node.DOCUMENT_POSITION_PRECEDING) {
+    for (let node = /** @type {Element | null} */ (target); node && node !== card; node = node.nextElementSibling) {
+      between.push(node);
+    }
+    card.after(...between);
+  } else {
+    for (let node = card.nextElementSibling; node && node !== target; node = node.nextElementSibling) between.push(node);
+    card.before(...between);
+  }
+}
+
+/**
+ * Hold a card's title: drag it up or down to move it, or let go without
+ * moving for its menu (hide it, or put the tab back in its first order).
+ * @param {HTMLElement} card
+ */
+function wireCardHandle(card) {
+  const handle = /** @type {HTMLElement} */ (card.querySelector("[data-card-handle]"));
+  const tab = /** @type {HTMLElement} */ (card.parentElement);
+  /** @type {{ x: number; y: number } | null} */
+  let start = null;
+  /** @type {"press" | "held" | "drag"} */
+  let mode = "press";
+  /** @type {ReturnType<typeof setTimeout> | undefined} */
+  let holdTimer;
+  // Where on the card the finger took it, and where the finger is now.
+  let grab = 0;
+  let pointerY = 0;
+  let scrolling = 0;
+
+  const follow = () => {
+    card.style.transform = "";
+    const natural = card.getBoundingClientRect().top;
+    card.style.transform = `translateY(${pointerY - grab - natural}px)`;
+  };
+
+  const place = () => {
+    const others = cardsOf(tab).filter((other) => other !== card && other.dataset.away !== "true");
+    // The first card whose middle is below the finger goes after this one.
+    const next = others.find((other) => {
+      const box = other.getBoundingClientRect();
+      return pointerY < box.top + box.height / 2;
+    });
+    const target = next ?? tab.querySelector(":scope > .restore");
+    if (card.nextElementSibling !== target) slideCards(cardsOf(tab), () => moveAround(card, target));
+    follow();
+  };
+
+  // Near the top or bottom edge the page scrolls, so a long tab stays reachable.
+  const edgeScroll = () => {
+    if (mode !== "drag") return;
+    const bottom = innerHeight - $("stats-strip").getBoundingClientRect().height - 80;
+    const speed = pointerY < 90 ? -(90 - pointerY) / 6 : pointerY > bottom ? (pointerY - bottom) / 6 : 0;
+    if (speed) {
+      scrollBy(0, speed);
+      place();
+    }
+    scrolling = requestAnimationFrame(edgeScroll);
+  };
+
+  handle.addEventListener("pointerdown", (event) => {
+    if (event.button !== 0) return;
+    // The workspaces card's own swipe mustn't see this.
+    event.stopPropagation();
+    closeCardMenus();
+    start = { x: event.clientX, y: event.clientY };
+    mode = "press";
+    handle.setPointerCapture(event.pointerId);
+    holdTimer = setTimeout(() => {
+      mode = "held";
+      card.dataset.lifted = "true";
+      navigator.vibrate?.(15);
+    }, 450);
+  });
+
+  handle.addEventListener("pointermove", (event) => {
+    if (!start) return;
+    pointerY = event.clientY;
+    const moved = Math.hypot(event.clientX - start.x, event.clientY - start.y) > 10;
+    if (mode === "press" && moved) {
+      clearTimeout(holdTimer);
+      start = null;
+      return;
+    }
+    if (mode === "held" && moved) {
+      mode = "drag";
+      grab = start.y - card.getBoundingClientRect().top;
+      scrolling = requestAnimationFrame(edgeScroll);
+    }
+    if (mode === "drag") place();
+  });
+
+  // Once held, the finger moves the card, not the page.
+  handle.addEventListener(
+    "touchmove",
+    (event) => {
+      if (mode !== "press") event.preventDefault();
+    },
+    { passive: false },
+  );
+
+  const end = () => {
+    clearTimeout(holdTimer);
+    cancelAnimationFrame(scrolling);
+    if (!start) return;
+    start = null;
+    card.dataset.lifted = "false";
+    card.style.transform = "";
+    if (mode === "held") openCardMenu(card);
+    if (mode === "drag") {
+      layout.order[tab.id] = cardsOf(tab).map(cardName);
+      saveLayout();
+    }
+    mode = "press";
+  };
+  handle.addEventListener("pointerup", end);
+  handle.addEventListener("pointercancel", end);
+  handle.addEventListener("contextmenu", (event) => event.preventDefault());
+}
+
+function closeCardMenus() {
+  document.querySelectorAll(".card-menu").forEach((menu) => menu.remove());
+}
+
+/** @param {HTMLElement} card */
+function openCardMenu(card) {
+  const tab = /** @type {HTMLElement} */ (card.parentElement);
+  const menu = document.createElement("div");
+  menu.className = "window-menu card-menu";
+  /** @type {[string, () => void][]} */
+  const items = [
+    [
+      `hide ${cardName(card)}`,
+      () => {
+        layout.away = [...new Set([...layout.away, cardName(card)])];
+        saveLayout();
+        applyLayout();
+      },
+    ],
+  ];
+  const saved = layout.order[tab.id];
+  if (saved && saved.join() !== defaultOrder[tab.id]?.join()) {
+    items.push([
+      "reset order",
+      () => {
+        delete layout.order[tab.id];
+        saveLayout();
+        slideCards(cardsOf(tab), applyLayout);
+      },
+    ]);
+  }
+  items.push(["cancel", () => {}]);
+  for (const [label, run] of items) {
+    const button = document.createElement("button");
+    button.textContent = label;
+    button.addEventListener("click", () => {
+      menu.remove();
+      run();
+    });
+    menu.append(button);
+  }
+  // Under the title's row, at the top of the card.
+  const head = /** @type {HTMLElement} */ (card.querySelector("[data-card-handle]"));
+  const row = /** @type {HTMLElement} */ (head.closest(".card > *"));
+  row.after(menu);
+  menu.scrollIntoView({ block: "nearest", behavior: "smooth" });
+}
+
+document.querySelectorAll(".tab > [data-card]").forEach((card) => wireCardHandle(/** @type {HTMLElement} */ (card)));
+applyLayout();
+
+const ACCENTS = [
+  ["red", "#d71921"],
+  ["blue", "#2f6bff"],
+  ["green", "#1faa59"],
+  ["orange", "#ff7a1a"],
+];
+const ACCENT_KEY = "hypr-remote-accent";
+
+/** @param {number} index */
+function setAccent(index) {
+  const [, color] = /** @type {string[]} */ (ACCENTS[index]);
+  document.documentElement.style.setProperty("--accent", /** @type {string} */ (color));
+}
+
+let accent = 0;
+try {
+  accent = Math.max(0, ACCENTS.findIndex(([name]) => name === localStorage.getItem(ACCENT_KEY)));
+} catch {}
+setAccent(accent);
+
+$("title").addEventListener("click", () => {
+  accent = (accent + 1) % ACCENTS.length;
+  setAccent(accent);
+  const name = /** @type {string} */ (ACCENTS[accent]?.[0]);
+  try {
+    localStorage.setItem(ACCENT_KEY, name);
+  } catch {}
+  toast(name);
+});
 
 /* -------------------------------------------------------------------------- */
 /* Rendering                                                                  */
