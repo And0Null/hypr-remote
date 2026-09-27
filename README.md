@@ -38,7 +38,7 @@ You need [Hyprland](https://hyprland.org) and [Bun](https://bun.sh).
 3. Log out and back in once.
 4. Show the pairing QR code and scan it with your phone:
    ```bash
-   journalctl --user -u hypr-remote
+   journalctl --user -u hypr-remote -e -o cat
    ```
 5. The browser warns about the certificate the first time. Tap **Advanced → Proceed**.
 6. Optional: in the remote, open **settings → install as an app**. It walks you through trusting the certificate so the warning goes away.

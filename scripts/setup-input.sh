@@ -19,6 +19,7 @@ elif ! command -v wtype >/dev/null || ! command -v ydotool >/dev/null; then
 fi
 
 # Let the input group (you) create virtual input devices for ydotoold.
+groups | grep -qw input || sudo usermod -aG input "$USER"
 echo 'KERNEL=="uinput", GROUP="input", MODE="0660", OPTIONS+="static_node=uinput"' \
   | sudo tee /etc/udev/rules.d/80-uinput.rules >/dev/null
 sudo udevadm control --reload
@@ -44,5 +45,5 @@ fi
 
 cd "$(dirname "$0")/.."
 "$bun" run install-service
-echo "done: typing, clicks and scrolling are on. log out and back in once for"
-echo "external monitor brightness (the new i2c group)."
+echo "done. log out and back in once so the new input and i2c groups apply:"
+echo "clicks and scrolling need input, external monitor brightness needs i2c."
