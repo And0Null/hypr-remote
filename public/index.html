@@ -35,7 +35,10 @@
         --dot: "Geist", system-ui, sans-serif;
         --mono: "Geist", system-ui, sans-serif;
         /* The tab bar and the stats strip above it. */
-        --nav: 7rem;
+        --nav: 7.9rem;
+        /* Frosted glass, for what floats over the page. */
+        --glass: rgb(30 30 30 / 0.55);
+        --glass-line: rgb(255 255 255 / 0.1);
       }
 
       * {
@@ -67,6 +70,9 @@
         margin: 0 auto;
         padding: max(1.25rem, env(safe-area-inset-top)) 1rem
           calc(var(--nav) + env(safe-area-inset-bottom) + 1.5rem);
+        /* A tab sliding in after a swipe must not widen the page: the phone
+           would zoom out to fit it, and the tab bar with it. */
+        overflow-x: clip;
       }
 
       header {
@@ -368,7 +374,7 @@
       }
 
       .window[data-focused="true"] .window-body {
-        border-color: var(--fg);
+        border-color: var(--accent);
       }
 
       .window-body[data-held="true"] {
@@ -664,12 +670,12 @@
       }
 
       .switch[data-on="true"] i {
-        background: var(--fg);
+        background: var(--accent);
       }
 
       .switch[data-on="true"] i::after {
         transform: translateX(1.2rem);
-        background: var(--bg);
+        background: var(--fg);
       }
 
       .switch small {
@@ -928,15 +934,17 @@
         display: flex;
         justify-content: space-between;
         width: min(100%, 28rem);
-        padding: 0 0.4rem;
+        padding: 0.1rem 0.5rem;
+        border-radius: 999px;
       }
 
       .stats-strip button {
         display: flex;
         align-items: baseline;
         gap: 0.3rem;
-        min-height: 2rem;
-        padding: 0 0.35rem;
+        /* Padding, not a min-height: baseline-aligned text sits at the top. */
+        min-height: 0;
+        padding: 0.55rem 0.35rem;
         border: 0;
         background: transparent;
         font-size: 0.72rem;
@@ -1362,9 +1370,9 @@
 
       /* Volume */
       .toggle[data-on="true"] {
-        background: var(--fg);
-        border-color: var(--fg);
-        color: var(--bg);
+        background: var(--accent);
+        border-color: var(--accent);
+        color: var(--fg);
       }
 
       #volume-slider[data-muted="true"] {
@@ -1387,8 +1395,8 @@
       }
 
       .mic[data-muted="true"] {
-        background: var(--red);
-        border-color: var(--red);
+        background: var(--accent);
+        border-color: var(--accent);
       }
 
       .apps {
@@ -1458,9 +1466,19 @@
         display: flex;
         flex-direction: column;
         align-items: center;
-        gap: 0.2rem;
-        padding: 0.6rem 1rem calc(0.6rem + env(safe-area-inset-bottom));
-        background: linear-gradient(to top, #000 60%, transparent);
+        gap: 0.4rem;
+        padding: 0.6rem 1rem calc(1rem + env(safe-area-inset-bottom));
+        /* The page shows between and around the pills, and takes touches there. */
+        pointer-events: none;
+      }
+
+      nav > * {
+        pointer-events: auto;
+        background: var(--glass);
+        border: 1px solid var(--glass-line);
+        -webkit-backdrop-filter: blur(1.25rem) saturate(1.8);
+        backdrop-filter: blur(1.25rem) saturate(1.8);
+        box-shadow: 0 0.75rem 2rem rgb(0 0 0 / 0.45);
       }
 
       nav [role="tablist"] {
@@ -1470,22 +1488,39 @@
         width: min(100%, 28rem);
         padding: 0.3rem;
         border-radius: 999px;
-        background: var(--surface);
-        border: 1px solid var(--line);
+        position: relative;
       }
 
-      nav button {
+      /* The white pill under the open tab, sliding from one tab to the next. */
+      nav [role="tablist"]::before {
+        content: "";
+        position: absolute;
+        top: 0.3rem;
+        bottom: 0.3rem;
+        left: 0.3rem;
+        width: calc((100% - 0.6rem - 0.75rem) / 4);
+        border-radius: 999px;
+        background: var(--accent);
+        transform: translateX(calc(var(--tab-index, 0) * (100% + 0.25rem)));
+        transition:
+          transform 280ms cubic-bezier(0.3, 0.8, 0.2, 1),
+          background-color 200ms ease;
+      }
+
+      nav [role="tab"] {
+        position: relative;
         min-height: 2.9rem;
         padding: 0;
         border: 0;
         background: transparent;
         color: var(--muted);
         font-size: 0.78rem;
+        transition: color 200ms ease;
       }
 
-      nav button[aria-selected="true"] {
-        background: var(--fg);
-        color: var(--bg);
+      nav [role="tab"][aria-selected="true"] {
+        background: transparent;
+        color: var(--fg);
       }
 
       .banner {

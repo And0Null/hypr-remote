@@ -28,7 +28,7 @@ web page, installable as an app, with four tabs:
   a timer and the slide, whose "start" picks the key your app needs (never
   a page-reloading F5 in a browser).
 
-It opens on desk. Hold a card's title to drag it up or down, or let go for
+It opens on desk; swipe left or right to change tab. Hold a card's title to drag it up or down, or let go for
 the option to hide it; tap the title in the header to change the accent
 colour. Both are remembered on that phone.
 

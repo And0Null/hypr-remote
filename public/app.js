@@ -162,8 +162,11 @@ function send(action, { buzz = true } = {}) {
 /* Tabs                                                                       */
 /* -------------------------------------------------------------------------- */
 
-/** @param {string} name */
-function showTab(name) {
+/**
+ * @param {string} name
+ * @param {1 | -1} [from] which side the tab slides in from, after a swipe
+ */
+function showTab(name, from) {
   /** @type {NodeListOf<HTMLElement>} */ (document.querySelectorAll("[role=tab]")).forEach((tab) => {
     tab.setAttribute("aria-selected", String(tab.dataset.tab === name));
   });
@@ -171,12 +174,80 @@ function showTab(name) {
     section.dataset.active = String(section.id === `tab-${name}`);
   });
   document.body.dataset.tab = name;
+  const tabs = [...document.querySelectorAll("[role=tab]")].map((tab) => /** @type {HTMLElement} */ (tab).dataset.tab);
+  /** @type {HTMLElement} */ (document.querySelector("[role=tablist]")).style.setProperty(
+    "--tab-index",
+    String(Math.max(0, tabs.indexOf(name))),
+  );
+  if (from) {
+    $(`tab-${name}`).animate(
+      [
+        { transform: `translateX(${from * 2.5}rem)`, opacity: 0.4 },
+        { transform: "none", opacity: 1 },
+      ],
+      { duration: 200, easing: "ease-out" },
+    );
+  }
   updateScreenPolling();
 }
 
 /** @type {NodeListOf<HTMLElement>} */ (document.querySelectorAll("[role=tab]")).forEach((tab) =>
   tab.addEventListener("click", () => showTab(/** @type {string} */ (tab.dataset.tab))),
 );
+/**
+ * Swipe left or right anywhere on the page for the next or previous tab,
+ * except on what already swipes sideways: the workspaces card, window and
+ * notification rows, sliders, text, card titles and the touchpad.
+ */
+function wireTabSwipe() {
+  // Overlays (the full-screen preview, presenter, keyboard dock, sheets)
+  // are theirs too.
+  const OWN_SWIPE = [
+    "#workspaces-card, .window, input, textarea, [data-card-handle], .pad",
+    "#viewer, #presenter, #dock, #sheet, #sheet-backdrop, #drop-strip",
+  ].join(", ");
+  const names = [...document.querySelectorAll("[role=tab]")].map((tab) => /** @type {HTMLElement} */ (tab).dataset.tab);
+  /** @type {{ x: number; y: number; at: number } | null} */
+  let start = null;
+  document.addEventListener(
+    "touchstart",
+    (event) => {
+      const touch = event.touches[0];
+      const own = /** @type {Element} */ (event.target).closest(OWN_SWIPE);
+      start =
+        event.touches.length === 1 && touch && !own ? { x: touch.clientX, y: touch.clientY, at: event.timeStamp } : null;
+    },
+    { passive: true },
+  );
+  document.addEventListener(
+    "touchmove",
+    (event) => {
+      if (event.touches.length > 1) start = null;
+    },
+    { passive: true },
+  );
+  document.addEventListener(
+    "touchend",
+    (event) => {
+      const touch = event.changedTouches[0];
+      if (!start || !touch) return;
+      const dx = touch.clientX - start.x;
+      const dy = touch.clientY - start.y;
+      const quick = event.timeStamp - start.at < 700;
+      start = null;
+      // Clearly sideways and far enough: a scroll that drifts doesn't count.
+      if (!quick || Math.abs(dx) < 60 || Math.abs(dx) < Math.abs(dy) * 2) return;
+      const step = dx < 0 ? 1 : -1;
+      const next = names[names.indexOf(document.body.dataset.tab) + step];
+      if (next) showTab(next, step);
+      else navigator.vibrate?.([10, 60, 10]);
+    },
+    { passive: true },
+  );
+  document.addEventListener("touchcancel", () => (start = null), { passive: true });
+}
+wireTabSwipe();
+
 // Always opens on desk, the home screen, as index.html is written. (Screen
 // polling starts once the page is set up.)
 document.body.dataset.tab = "desk";
