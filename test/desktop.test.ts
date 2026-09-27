@@ -54,7 +54,7 @@ describe("toSnapshot", () => {
         { address: "0x2", title: "0x2", app: "kitty", workspace: 1, focused: false, fullscreen: false, floating: false },
         { address: "0x3", title: "browser", app: "kitty", workspace: 2, focused: true, fullscreen: false, floating: false },
       ],
-      monitors: [{ name: "eDP-1", label: "laptop", focused: true, workspace: 2, on: true }],
+      monitors: [{ name: "eDP-1", label: "laptop", focused: true, workspace: 2 }],
     });
   });
 

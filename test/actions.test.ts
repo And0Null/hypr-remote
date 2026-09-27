@@ -35,7 +35,6 @@ describe("Action", () => {
       { type: "night-light", on: true },
       { type: "night-light-set", temperature: 3500 },
       { type: "scene-save", id: "movie" },
-      { type: "screen", on: false },
       { type: "power", op: "sleep" },
       { type: "radio-menu", device: "bluetooth" },
       { type: "radio", device: "wifi", on: false },

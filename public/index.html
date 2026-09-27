@@ -36,6 +36,8 @@
         --mono: "Geist", system-ui, sans-serif;
         /* The tab bar and the stats strip above it. */
         --nav: 7.9rem;
+        /* How far the power dock reaches in from the right, over the desk. */
+        --deck: 3.75rem;
         /* Frosted glass, for what floats over the page. */
         --glass: rgb(30 30 30 / 0.55);
         --glass-line: rgb(255 255 255 / 0.1);
@@ -683,30 +685,6 @@
         color: var(--muted);
         font-size: 0.68rem;
         margin-top: 0.15rem;
-      }
-
-      /* Hold-to-confirm: the fill shows how long is left before it fires. */
-      .hold {
-        position: relative;
-        overflow: hidden;
-        width: 100%;
-      }
-
-      .hold .fill {
-        position: absolute;
-        inset: 0;
-        background: var(--accent);
-        transform-origin: left;
-        transform: scaleX(0);
-      }
-
-      .hold[data-holding="true"] .fill {
-        transform: scaleX(1);
-        transition: transform 800ms linear;
-      }
-
-      .hold > span:last-child {
-        position: relative;
       }
 
       /* Text inputs */
@@ -1437,26 +1415,69 @@
       }
 
       /* Power */
-      .power {
+      /* Power: a glass dock on the desk's right edge, running off the screen. */
+      .power-deck {
+        position: fixed;
+        z-index: 20;
+        right: 0;
+        top: calc(50% - var(--nav) / 2 + 1rem);
+        transform: translateY(-50%);
+        display: none;
+        flex-direction: column;
+        justify-content: center;
+        gap: 0.5rem;
+        width: var(--deck);
+        height: 24.125rem;
+        /* The buttons sit on the straight part, between the shoulders. */
+        padding: 5rem 0 5rem 0.0625rem;
+        align-items: center;
+      }
+
+      .deck-shape {
+        position: absolute;
+        inset: 0;
+        width: 100%;
+        height: 100%;
+      }
+
+      .deck-fill {
+        fill: var(--bg);
+      }
+
+
+      body[data-tab="desk"] .power-deck {
+        display: flex;
+      }
+
+      .deck-hold {
+        position: relative;
+        width: 2.9rem;
+        height: 2.9rem;
+        min-height: 0;
+        padding: 0;
         display: grid;
-        grid-template-columns: repeat(3, 1fr);
-        gap: 0.6rem;
-        margin-top: 1rem;
+        place-items: center;
+        background: transparent;
+        border: 0;
       }
 
-      .power-2 {
-        margin-top: 0.6rem;
+      /* No pressed look: the flood is the feedback. */
+      .deck-hold:active {
+        background: transparent;
+        transform: none;
       }
 
-      .power button,
-      .power-2 button {
-        padding: 0 0.4rem;
-        font-size: 0.85rem;
+      .deck-hold > svg {
+        width: 1rem;
+        height: 1rem;
       }
 
-      .hold[data-armed="true"] {
-        background: var(--red);
-        border-color: var(--red);
+      /* Grows from the held icon; the deck is full when the hold completes. */
+      .deck-flood {
+        fill: var(--accent);
+        transform-box: fill-box;
+        transform-origin: center;
+        transform: scale(0);
       }
 
       /* Bottom navigation */
@@ -1756,31 +1777,6 @@
           </div>
           <p class="hint" id="notifications-missing" hidden>no notification daemon found: swaync, mako or dunst.</p>
         </div>
-
-        <div class="card" data-card="power">
-          <p class="label" data-card-handle>power</p>
-          <div class="power">
-            <button class="hold" id="lock" data-hold='{"type":"lock"}' aria-label="hold to lock the screen">
-              <span class="fill"></span><span>lock</span>
-            </button>
-            <button class="hold" id="screen-off" data-hold='{"type":"screen","on":false}' aria-label="hold to turn the screens off">
-              <span class="fill"></span><span>screen off</span>
-            </button>
-            <button class="primary" id="screen-on" data-action='{"type":"screen","on":true}' hidden>screen on</button>
-            <button class="hold" data-hold='{"type":"power","op":"sleep"}' aria-label="hold to sleep">
-              <span class="fill"></span><span>sleep</span>
-            </button>
-          </div>
-          <div class="grid-2 power-2">
-            <button class="hold" data-hold='{"type":"power","op":"restart"}' data-confirm="tap to restart" aria-label="hold to restart">
-              <span class="fill"></span><span>restart</span>
-            </button>
-            <button class="hold" data-hold='{"type":"power","op":"shut-down"}' data-confirm="tap to shut down" aria-label="hold to shut down">
-              <span class="fill"></span><span>shut down</span>
-            </button>
-          </div>
-          <p class="hint">hold to confirm</p>
-        </div>
       </section>
 
       <!-- ================================================================ -->
@@ -1957,6 +1953,36 @@
         <button role="tab" data-tab="input" aria-selected="false">input</button>
       </div>
     </nav>
+
+    <!-- Power, on the desk's right edge. Every one is a hold. -->
+    <div class="power-deck" id="power-deck">
+      <!-- Half an emerald cut: straight arms slant in from the screen's edge to
+           a straight body, its two corners softened. 1 unit = 1px at 16px per
+           rem, like the CSS size. Holding an icon floods it with the accent,
+           spreading from that icon. -->
+      <svg class="deck-shape" viewBox="0 0 60 386" aria-hidden="true">
+        <defs>
+          <clipPath id="deck-clip"><path d="M61 0 L60 0 L10.5 67.1 Q1 80 1 96 L1 290 Q1 306 10.5 318.9 L60 386 L61 386 Z" /></clipPath>
+        </defs>
+        <path class="deck-fill" d="M61 0 L60 0 L10.5 67.1 Q1 80 1 96 L1 290 Q1 306 10.5 318.9 L60 386 L61 386 Z" />
+        <!-- The clip on a group: on the circle it would scale along with it. -->
+        <g clip-path="url(#deck-clip)">
+          <circle class="deck-flood" id="deck-flood" cx="30" cy="193" r="0" />
+        </g>
+      </svg>
+      <button class="deck-hold" data-hold='{"type":"power","op":"shut-down"}' aria-label="hold to shut down">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M12 3v8M6.3 6.8a8 8 0 1 0 11.4 0" /></svg>
+      </button>
+      <button class="deck-hold" data-hold='{"type":"power","op":"restart"}' aria-label="hold to restart">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 12a8 8 0 1 1-2.3-5.7M20 4v4.5h-4.5" /></svg>
+      </button>
+      <button class="deck-hold" data-hold='{"type":"power","op":"sleep"}' aria-label="hold to sleep">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 14.5A8 8 0 0 1 9.5 4a8 8 0 1 0 10.5 10.5z" /></svg>
+      </button>
+      <button class="deck-hold" data-hold='{"type":"lock"}' aria-label="hold to lock">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="5" y="11" width="14" height="10" rx="2" /><path d="M8 11V7.5a4 4 0 0 1 8 0V11" /></svg>
+      </button>
+    </div>
 
     <div class="drop-strip" id="drop-strip" hidden>
       <p class="label">drop on a workspace</p>

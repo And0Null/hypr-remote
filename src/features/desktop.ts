@@ -18,8 +18,7 @@ export type DesktopSnapshot = {
   activeWorkspace: number | null;
   activeWindow: string | null;
   windows: Window[];
-  /** `on` is false while the screen is switched off (DPMS). */
-  monitors: { name: string; label: string; focused: boolean; workspace: number; on: boolean }[];
+  monitors: { name: string; label: string; focused: boolean; workspace: number }[];
 };
 
 export async function readDesktop(): Promise<DesktopSnapshot> {
@@ -66,7 +65,6 @@ export function toSnapshot(
       label: monitorLabel(monitor),
       focused: monitor.focused,
       workspace: monitor.activeWorkspace.id,
-      on: monitor.dpmsStatus !== false,
     })),
   };
 }

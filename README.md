@@ -7,12 +7,14 @@ web page, installable as an app, with four tabs:
   open the laptop's menu); workspaces in use, each with the app on it (swipe to switch, hold
   one to move the focused window there); the window list (tap to focus, swipe
   left to close, hold to drag onto a workspace or for fullscreen, float and
-  force kill); and media with album art, seeking and volume.
+  force kill); media with album art, seeking and volume; and a dock on the
+  right edge to shut down, restart, sleep or lock (hold one until the colour
+  spreading from it fills the dock).
 - **control**: scenes (tap again to undo, hold to save what's on now); volume
   with speakers, headphones, HDMI or Bluetooth, microphone mute and per-app
   volume; brightness per screen and night light; notifications (tap to open
   the app, swipe to dismiss) and do not disturb for an hour or until
-  morning; lock, screen off, sleep, restart and shut down.
+  morning.
 - **bridge**: the clipboard both ways, text or images (what the laptop just
   copied shows live, with the last few before it; send takes what the phone
   copied); links open on the laptop; files go to `~/Downloads` and open

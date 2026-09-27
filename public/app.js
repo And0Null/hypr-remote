@@ -204,7 +204,7 @@ function wireTabSwipe() {
   // are theirs too.
   const OWN_SWIPE = [
     "#workspaces-card, .window, input, textarea, [data-card-handle], .pad",
-    "#viewer, #presenter, #dock, #sheet, #sheet-backdrop, #drop-strip",
+    "#viewer, #presenter, #dock, #sheet, #sheet-backdrop, #drop-strip, #power-deck",
   ].join(", ");
   const names = [...document.querySelectorAll("[role=tab]")].map((tab) => /** @type {HTMLElement} */ (tab).dataset.tab);
   /** @type {{ x: number; y: number; at: number } | null} */
@@ -1188,7 +1188,6 @@ function renderControl() {
   renderVolume();
   renderBrightness();
   renderNotifications();
-  renderPower();
 }
 
 /* -------------------------------------------------------------------------- */
@@ -1559,17 +1558,6 @@ function attachNoteGestures(row, body, id) {
 }
 
 /* -------------------------------------------------------------------------- */
-/* Control: power                                                             */
-/* -------------------------------------------------------------------------- */
-
-function renderPower() {
-  // Any screen off counts: "screen on" brings them all back.
-  const off = state.monitors.some((monitor) => !monitor.on);
-  $("screen-off").hidden = off;
-  $("screen-on").hidden = !off;
-}
-
-/* -------------------------------------------------------------------------- */
 /* Desk header: Wi-Fi and Bluetooth                                           */
 /* -------------------------------------------------------------------------- */
 
@@ -1779,55 +1767,69 @@ tapOrHold($("bluetooth-pill"), {
   hold: () => send({ type: "radio-menu", device: "bluetooth" }),
 });
 
-// Hold-to-confirm: a stray tap in a pocket shouldn't lock or power off the
-// laptop. Restart and shut down also want a tap after the hold: the remote
-// can't undo them.
+// Power on the desk's dock: each is a hold, so a stray tap in a pocket can't
+// lock or power off the laptop. The accent floods the dock from the held icon,
+// and the action happens once it's full; letting go early drains it.
+const HOLD_MS = 1000;
+const DECK = { width: 60, height: 386 }; // the dock's viewBox
+const flood = /** @type {SVGCircleElement} */ (/** @type {unknown} */ ($("deck-flood")));
+/** @type {Animation | null} */
+let flooding = null;
+/** @type {Animation | null} */
+let fading = null;
+
+/** @param {HTMLElement} button */
+function startFlood(button) {
+  const deck = /** @type {Element} */ (flood.ownerSVGElement).getBoundingClientRect();
+  const icon = button.getBoundingClientRect();
+  const unit = DECK.width / deck.width;
+  const cx = (icon.left + icon.width / 2 - deck.left) * unit;
+  const cy = (icon.top + icon.height / 2 - deck.top) * unit;
+  // Just big enough to reach the farthest corner: full exactly at the end.
+  const corners = [
+    [0, 0],
+    [DECK.width, 0],
+    [0, DECK.height],
+    [DECK.width, DECK.height],
+  ];
+  const r = Math.max(...corners.map(([x, y]) => Math.hypot(/** @type {number} */ (x) - cx, /** @type {number} */ (y) - cy)));
+  flood.setAttribute("cx", String(cx));
+  flood.setAttribute("cy", String(cy));
+  flood.setAttribute("r", String(r));
+  flooding?.cancel();
+  fading?.cancel();
+  flooding = flood.animate([{ transform: "scale(0)" }, { transform: "scale(1)" }], {
+    duration: HOLD_MS,
+    easing: "cubic-bezier(0.4, 0, 0.8, 1)",
+    fill: "forwards",
+  });
+  return flooding;
+}
+
 /** @type {NodeListOf<HTMLElement>} */ (document.querySelectorAll("[data-hold]")).forEach((button) => {
-  const label = /** @type {HTMLElement} */ (button.lastElementChild);
-  const text = label.textContent;
-  /** @type {ReturnType<typeof setTimeout> | undefined} */
-  let timer = undefined;
-  /** @type {ReturnType<typeof setTimeout> | undefined} */
-  let disarm = undefined;
-  // The release that ends a hold is a click too; it mustn't confirm.
-  let justHeld = false;
-  const action = () => JSON.parse(/** @type {string} */ (button.dataset.hold));
-  const cancel = () => {
-    clearTimeout(timer);
-    button.dataset.holding = "false";
-  };
-  const reset = () => {
-    clearTimeout(disarm);
-    button.dataset.armed = "false";
-    label.textContent = text;
+  /** @type {Animation | null} */
+  let mine = null;
+  const drain = () => {
+    if (!mine || mine.playState !== "running") return;
+    mine.updatePlaybackRate(-4);
   };
   button.addEventListener("pointerdown", () => {
-    justHeld = false;
-    if (button.dataset.armed === "true") return;
-    button.dataset.holding = "true";
-    timer = setTimeout(() => {
-      cancel();
-      justHeld = true;
+    const animation = startFlood(button);
+    mine = animation;
+    animation.onfinish = () => {
+      if (animation.playbackRate < 0) return animation.cancel();
+      mine = null;
       navigator.vibrate?.([20, 40, 20]);
-      if (!button.dataset.confirm) {
-        send(action());
-        return;
-      }
-      button.dataset.armed = "true";
-      label.textContent = button.dataset.confirm;
-      disarm = setTimeout(reset, 3000);
-    }, 800);
+      send(JSON.parse(/** @type {string} */ (button.dataset.hold)));
+      // Full for a moment, then fades back to black.
+      fading = flood.animate([{ opacity: 1 }, { opacity: 0 }], { duration: 400, delay: 350, easing: "ease-out" });
+      fading.finished.then(
+        () => animation.cancel(),
+        () => {},
+      );
+    };
   });
-  button.addEventListener("click", () => {
-    if (justHeld) {
-      justHeld = false;
-      return;
-    }
-    if (button.dataset.armed !== "true") return;
-    reset();
-    send(action());
-  });
-  ["pointerup", "pointercancel", "pointerleave"].forEach((type) => button.addEventListener(type, cancel));
+  ["pointerup", "pointercancel", "pointerleave"].forEach((type) => button.addEventListener(type, drain));
   button.addEventListener("contextmenu", (event) => event.preventDefault());
 });
 

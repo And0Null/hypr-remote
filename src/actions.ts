@@ -24,7 +24,7 @@ import {
   findNote,
   setDndMode,
 } from "./features/notifications";
-import { lockScreen, powerOff, setScreens } from "./features/power";
+import { lockScreen, powerOff } from "./features/power";
 import { openMenu, setRadio } from "./features/radios";
 import { clickOnScreen } from "./features/screen";
 import { openDownloads, openLink, openReceived } from "./features/send";
@@ -65,7 +65,6 @@ export const Action = z.discriminatedUnion("type", [
   }),
   z.strictObject({ type: z.literal("workspace"), id: workspaceId }),
   z.strictObject({ type: z.literal("lock") }),
-  z.strictObject({ type: z.literal("screen"), on: z.boolean() }),
   z.strictObject({ type: z.literal("power"), op: z.enum(["sleep", "restart", "shut-down"]) }),
 
   z.strictObject({
@@ -186,9 +185,6 @@ export async function runAction(
       break;
     case "lock":
       await lockScreen();
-      break;
-    case "screen":
-      await setScreens(action.on);
       break;
     case "power": {
       // Replies first: after this, the laptop won't be answering.
