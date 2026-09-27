@@ -6,6 +6,8 @@
 
 <p align="center">Control your Hyprland desktop from your phone over home Wi-Fi.<br />A web page you can install as an app. No app store, no cloud.</p>
 
+![Demo: the phone switches workspaces, pauses a movie, sets volume and brightness, types into a terminal, moves the pointer and sends a file that opens on the laptop](docs/demo.webp)
+
 ![The four tabs: desk, control, bridge and input](docs/tabs.webp)
 
 ![The notifications list, the full player, and the general and desk tabs of settings](docs/settings.webp)
