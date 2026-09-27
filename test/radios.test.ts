@@ -1,19 +1,19 @@
 import { describe, expect, test } from "bun:test";
 
-import { parseBluetoothDevices, parseDevices, parseQuickshellInstances } from "../src/features/radios";
+import { parseBluetoothDevices, parseWifi } from "../src/features/radios";
 
-describe("parseDevices", () => {
-  test("names the Wi-Fi network and notices a cable", () => {
+describe("parseWifi", () => {
+  test("names the Wi-Fi network", () => {
     const output = ["wifi:connected:Airtel_Wifi?", "loopback:connected (externally):lo", "ethernet:connected:Wired 1"].join("\n");
-    expect(parseDevices(output)).toEqual({ wifi: "Airtel_Wifi?", wired: true });
+    expect(parseWifi(output)).toBe("Airtel_Wifi?");
   });
 
   test("unescapes colons in network names", () => {
-    expect(parseDevices("wifi:connected:Cafe\\: guest").wifi).toBe("Cafe: guest");
+    expect(parseWifi("wifi:connected:Cafe\\: guest")).toBe("Cafe: guest");
   });
 
   test("ignores devices that aren't connected", () => {
-    expect(parseDevices("wifi:disconnected:\nethernet:unavailable:")).toEqual({ wifi: null, wired: false });
+    expect(parseWifi("wifi:disconnected:\nethernet:connected:Wired 1")).toBeNull();
   });
 });
 
@@ -25,12 +25,5 @@ describe("parseBluetoothDevices", () => {
 
   test("is empty when nothing is connected", () => {
     expect(parseBluetoothDevices("")).toEqual([]);
-  });
-});
-
-describe("parseQuickshellInstances", () => {
-  test("finds every running instance", () => {
-    const output = "Instance p2y18kwylt:\n  Process ID: 90817\n\nInstance u2y18kwylt:\n  Process ID: 90822\n";
-    expect(parseQuickshellInstances(output)).toEqual(["p2y18kwylt", "u2y18kwylt"]);
   });
 });

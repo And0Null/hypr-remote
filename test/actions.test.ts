@@ -25,19 +25,18 @@ describe("Action", () => {
       { type: "media-seek", to: 83.5 },
       { type: "window-move", address: "0xabc", workspace: 4 },
       { type: "scene", id: "movie" },
-      { type: "output", id: "alsa_card.pci-0000_00_1f.3#hdmi-output-0" },
       { type: "notifications", op: "clear" },
       { type: "dnd", mode: "hour" },
       { type: "notification", op: "open", id: 23 },
       { type: "mic" },
-      { type: "app-volume", name: "firefox", level: 40 },
       { type: "brightness-set", level: 40, screen: "HDMI-A-1" },
       { type: "night-light", on: true },
       { type: "night-light-set", temperature: 3500 },
-      { type: "scene-save", id: "movie" },
+      { type: "scene-put", scene: { label: "reading", volume: 20, brightness: 60, dnd: true } },
+      { type: "scene-put", scene: { id: "movie", label: "movie", nightLight: false, media: "play" } },
+      { type: "scene-delete", id: "movie" },
       { type: "power", op: "sleep" },
-      { type: "radio-menu", device: "bluetooth" },
-      { type: "radio", device: "wifi", on: false },
+      { type: "bluetooth", on: false },
       { type: "clipboard-set", text: "" },
       { type: "open-received", name: "photo.jpg" },
       { type: "open-downloads" },
@@ -67,7 +66,7 @@ describe("Action", () => {
     rejects({ type: "shell", command: "rm -rf ~" });
     rejects({ type: "LOCK" });
     rejects({ type: "media", command: "stop" });
-    rejects({ type: "radio", device: "wifi", on: "true" });
+    rejects({ type: "bluetooth", on: "true" });
     rejects({ type: "window", op: "move", address: "0x1" });
     // Clips reach the phone over /clip now.
     rejects({ type: "clipboard-get" });
@@ -116,6 +115,12 @@ describe("Action", () => {
     rejects({ type: "pointer-scroll", dy: 0, dx: 21 });
     rejects({ type: "pointer-button", state: "click" });
     rejects({ type: "open-received", name: "" });
+    rejects({ type: "scene-put", scene: { label: "   " } });
+    rejects({ type: "scene-put", scene: { label: "x".repeat(25) } });
+    rejects({ type: "scene-put", scene: { label: "loud", volume: 101 } });
+    rejects({ type: "scene-put", scene: { label: "dim", brightness: 2 } });
+    rejects({ type: "scene-put", scene: { label: "x", id: "Not An Id" } });
+    rejects({ type: "scene-put", scene: { label: "x", extra: true } });
   });
 
   test("accepts workspaces past 10, up to 99", () => {

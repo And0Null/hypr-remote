@@ -47,7 +47,7 @@ export async function loadScenes(): Promise<Scene[]> {
     return DEFAULT_SCENES;
   }
 
-  const parsed = z.array(Scene).max(12).safeParse(await file.json().catch(() => null));
+  const parsed = z.array(Scene).max(MAX_SCENES).safeParse(await file.json().catch(() => null));
   if (!parsed.success) {
     console.warn(`${FILE} is invalid; using the default scenes.`);
     return DEFAULT_SCENES;
@@ -73,7 +73,7 @@ export function watchScenes(onChange: (scenes: Scene[]) => void) {
 }
 
 /* -------------------------------------------------------------------------- */
-/* Applying, undoing and saving                                               */
+/* Applying, undoing and editing                                              */
 /* -------------------------------------------------------------------------- */
 
 /** The settings a scene can change, as they are right now. */
@@ -159,25 +159,57 @@ async function restore(before: Settings) {
   ]);
 }
 
+/** What the phone's scene editor sends: a scene without its id, and which one it replaces. */
+export const SceneInput = z.strictObject({
+  ...Scene.omit({ id: true }).shape,
+  label: z.string().trim().min(1).max(24),
+  id: Scene.shape.id.optional(),
+});
+export type SceneInput = z.infer<typeof SceneInput>;
+
+export const MAX_SCENES = 12;
+
+/** An id from a name: "Late night!" → "late-night", made unique among `taken`. */
+export function sceneId(label: string, taken: string[]): string {
+  const base =
+    label
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, "-")
+      .replace(/^-+|-+$/g, "")
+      .slice(0, 20) || "scene";
+  let id = base;
+  for (let n = 2; taken.includes(id); n++) id = `${base}-${n}`;
+  return id;
+}
+
 /**
- * Saves what's on now into a scene: volume, brightness (the laptop's), do not
- * disturb and night light. Play or pause stays as the scene had it.
+ * The scenes with one added, or replaced when `input.id` names one. A setting
+ * left out of the input is one the scene leaves alone. Null when there's no
+ * room for another.
  */
-export async function saveScene(scenes: Scene[], id: string): Promise<Scene[] | null> {
-  const scene = scenes.find((candidate) => candidate.id === id);
-  if (!scene) return null;
-  const now = await readSettings();
-  const brightness = now.brightness[0]?.level;
-  const updated: Scene = {
-    ...scene,
-    ...(now.volume !== null && { volume: now.volume }),
-    ...(brightness != null && { brightness: Math.max(5, brightness) }),
-    ...(now.dnd !== null && { dnd: now.dnd }),
-    ...(now.nightLight !== null && { nightLight: now.nightLight }),
-  };
-  const next = scenes.map((candidate) => (candidate.id === id ? updated : candidate));
+export function withScene(scenes: Scene[], input: SceneInput): Scene[] | null {
+  const { id, ...settings } = input;
+  const existing = id ? scenes.find((scene) => scene.id === id) : undefined;
+  if (existing) return scenes.map((scene) => (scene.id === id ? { id: existing.id, ...settings } : scene));
+  if (scenes.length >= MAX_SCENES) return null;
+  const taken = scenes.map((scene) => scene.id);
+  return [...scenes, { id: sceneId(settings.label, taken), ...settings }];
+}
+
+/** Saves a scene from the editor. The file watcher tells the phones. */
+export async function putScene(scenes: Scene[], input: SceneInput): Promise<Scene[] | null> {
+  const next = withScene(scenes, input);
+  if (!next) return null;
   await writeScenes(next);
-  // The scene now matches, and there's nothing sensible to undo back to.
+  // Whatever it undid to may no longer make sense.
+  if (undo?.id === input.id) undo = null;
+  return next;
+}
+
+export async function deleteScene(scenes: Scene[], id: string): Promise<Scene[] | null> {
+  if (!scenes.some((scene) => scene.id === id)) return null;
+  const next = scenes.filter((scene) => scene.id !== id);
+  await writeScenes(next);
   if (undo?.id === id) undo = null;
   return next;
 }

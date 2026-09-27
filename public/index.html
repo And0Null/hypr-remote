@@ -41,7 +41,7 @@
         --player-overlap: 2rem;
         --nav: var(--nav-base);
         /* How far the power dock reaches in from the right, over the desk. */
-        --deck: 3.75rem;
+        --deck: 3rem;
         /* Frosted glass, for what floats over the page. */
         --glass: rgb(30 30 30 / 0.55);
         --glass-line: rgb(255 255 255 / 0.1);
@@ -94,6 +94,56 @@
         color: var(--muted);
         letter-spacing: 0.02em;
         margin-bottom: 1rem;
+      }
+
+      .header-end {
+        display: flex;
+        align-items: center;
+        gap: 0.4rem;
+        min-width: 0;
+      }
+
+      /* Notifications, on every tab; a count while there are some. */
+      .bell {
+        position: relative;
+        flex: none;
+        display: grid;
+        place-items: center;
+        width: 2.1rem;
+        height: 2.1rem;
+        min-height: 0;
+        padding: 0;
+        border-radius: 50%;
+      }
+
+      .bell svg {
+        width: 1rem;
+        height: 1rem;
+      }
+
+      .bell .bell-off,
+      .bell[data-dnd="true"] .bell-on {
+        display: none;
+      }
+
+      .bell[data-dnd="true"] .bell-off {
+        display: block;
+      }
+
+      .bell-count {
+        position: absolute;
+        top: -0.2rem;
+        right: -0.2rem;
+        min-width: 1.05rem;
+        height: 1.05rem;
+        padding: 0 0.25rem;
+        border-radius: 999px;
+        background: var(--accent);
+        color: var(--fg);
+        font-size: 0.6rem;
+        font-weight: 600;
+        line-height: 1.05rem;
+        text-align: center;
       }
 
       .status {
@@ -642,58 +692,6 @@
         border-radius: 50%;
         background: var(--fg);
         border: 0.25rem solid var(--bg);
-      }
-
-      /* Switches */
-      .switch {
-        display: flex;
-        align-items: center;
-        justify-content: space-between;
-        gap: 1rem;
-        width: 100%;
-        min-height: 3.5rem;
-        border-radius: 1.1rem;
-        text-align: left;
-      }
-
-      .switch i {
-        flex: none;
-        position: relative;
-        width: 2.6rem;
-        height: 1.4rem;
-        border-radius: 999px;
-        background: #3a3a3a;
-        transition: background-color 150ms ease;
-      }
-
-      .switch i::after {
-        content: "";
-        position: absolute;
-        top: 0.2rem;
-        left: 0.2rem;
-        width: 1rem;
-        height: 1rem;
-        border-radius: 50%;
-        background: var(--muted);
-        transition:
-          transform 150ms ease,
-          background-color 150ms ease;
-      }
-
-      .switch[data-on="true"] i {
-        background: var(--accent);
-      }
-
-      .switch[data-on="true"] i::after {
-        transform: translateX(1.2rem);
-        background: var(--fg);
-      }
-
-      .switch small {
-        display: block;
-        color: var(--muted);
-        font-size: 0.68rem;
-        margin-top: 0.15rem;
       }
 
       /* Text inputs */
@@ -1268,15 +1266,49 @@
         font-size: 0.8rem;
       }
 
-      /* Wi-Fi and Bluetooth, in the header on desk; "live" everywhere else. */
-      .radio-pills {
+      /* Wi-Fi and Bluetooth icons, in the header on desk; "live" everywhere else. */
+      .radios {
         display: none;
-        gap: 0.4rem;
-        min-width: 0;
+        gap: 0.2rem;
       }
 
-      body[data-tab="desk"] .radio-pills {
+      body[data-tab="desk"] .radios {
         display: flex;
+      }
+
+      .radio {
+        display: grid;
+        place-items: center;
+        width: 2.1rem;
+        height: 2.1rem;
+        min-height: 0;
+        padding: 0;
+        border: 0;
+        border-radius: 50%;
+        background: transparent;
+        -webkit-touch-callout: none;
+      }
+
+      .radio[hidden] {
+        display: none;
+      }
+
+      .radio svg {
+        width: 1.05rem;
+        height: 1.05rem;
+      }
+
+      .radio[data-on="false"] {
+        color: var(--faint);
+      }
+
+      .radio#bluetooth[data-on="true"] {
+        color: var(--accent);
+      }
+
+      /* On desk, Wi-Fi stands in for "live": red while the laptop is out of reach. */
+      .radio#wifi[data-live="false"] {
+        color: var(--red);
       }
 
       body[data-tab="desk"] #status {
@@ -1302,76 +1334,182 @@
         margin: 0;
       }
 
-      .radio-pill[data-on="false"] {
-        color: var(--faint);
-      }
-
-      /* The connection to the laptop: white while live, red when it drops. */
-      .radio-pill i {
-        flex: none;
-        width: 0.4rem;
-        height: 0.4rem;
-        border-radius: 50%;
-        background: var(--red);
-      }
-
-      .radio-pill[data-live="true"] i {
-        background: var(--fg);
-      }
-
       .install-pill {
         max-width: none;
         border-color: var(--fg);
       }
 
       /* Scenes */
-      .scenes button {
+      /* Volume and brightness as two tall pills, filled from the bottom. */
+      .levels {
         display: flex;
-        flex-direction: column;
-        align-items: center;
+        flex-wrap: wrap;
         justify-content: center;
-        gap: 0.3rem;
-        min-width: 0;
-        min-height: 4.4rem;
-        padding: 0.4rem 0.6rem;
-        border-radius: 1.25rem;
+        gap: 1rem 1.5rem;
+        padding: 0.5rem 0;
+      }
+
+      .levels .hint {
+        flex-basis: 100%;
+        text-align: center;
+      }
+
+      .level {
+        --level: 0;
+        position: relative;
+        width: 5.5rem;
+        height: 12.5rem;
+        border-radius: 999px;
+        overflow: hidden;
+        background: color-mix(in srgb, var(--accent) 20%, #000);
+        touch-action: none;
+        cursor: ns-resize;
+      }
+
+      .level-fill {
+        position: absolute;
+        inset: auto 0 0;
+        height: calc(var(--level) * 100%);
+        background: var(--accent);
+        transition: height 120ms ease-out;
+      }
+
+      .level[data-dragging="true"] .level-fill {
+        transition: none;
+      }
+
+      .level[data-muted="true"] .level-fill {
+        background: color-mix(in srgb, var(--accent) 35%, #555);
+      }
+
+      .level-value {
+        position: absolute;
+        top: 1.1rem;
+        inset-inline: 0;
+        text-align: center;
+        font-size: 0.78rem;
+        font-variant-numeric: tabular-nums;
+        color: var(--fg);
+        opacity: 0.75;
+      }
+
+      .level-icon {
+        position: absolute;
+        bottom: 1.4rem;
+        left: 50%;
+        transform: translateX(-50%);
+        display: grid;
+        place-items: center;
+        width: 2.6rem;
+        height: 2.6rem;
+        min-height: 0;
+        padding: 0;
+        border: 0;
+        border-radius: 50%;
+        background: transparent;
+        color: color-mix(in srgb, var(--accent) 25%, #000);
+      }
+
+      .level-icon svg {
+        width: 1.35rem;
+        height: 1.35rem;
+      }
+
+      /* Scenes: compact chips in one row, sliding sideways if there are many. */
+      .scene-row {
+        display: flex;
+        gap: 0.4rem;
+        margin-top: 0.9rem;
+        overflow-x: auto;
+        scrollbar-width: none;
+      }
+
+      .scene-row::-webkit-scrollbar {
+        display: none;
+      }
+
+      .scene-row button {
+        flex: 1 0 auto;
+        min-height: 2.5rem;
+        padding: 0 0.85rem;
+        border-radius: 999px;
+        font-size: 0.78rem;
         -webkit-touch-callout: none;
       }
 
-      .scenes small {
-        max-width: 100%;
-        font-size: 0.62rem;
-        color: var(--muted);
-      }
-
-      .scenes button[data-active="true"] {
-        background: var(--fg);
-        border-color: var(--fg);
-        color: var(--bg);
-      }
-
-      .scenes button[data-active="true"] small {
-        color: var(--bg);
-      }
-
-      /* Volume */
-      .toggle[data-on="true"] {
+      .scene-row button[data-active="true"] {
         background: var(--accent);
         border-color: var(--accent);
         color: var(--fg);
       }
 
-      #volume-slider[data-muted="true"] {
-        opacity: 0.4;
+      .scene-row .scene-add {
+        flex: none;
+        width: 2.5rem;
+        padding: 0;
+        font-size: 1.1rem;
+        color: var(--muted);
       }
 
+      .scene-name {
+        margin-top: 0.9rem;
+        min-height: 2.8rem;
+      }
+
+      .scene-setting {
+        margin-top: 0.8rem;
+      }
+
+      .scene-setting > .row > span:first-child {
+        font-size: 0.82rem;
+      }
+
+      .scene-setting input[type="range"] {
+        margin-top: 0.3rem;
+      }
+
+      /* Segmented choice: one of a few. */
+      .seg {
+        display: inline-flex;
+        gap: 0.25rem;
+      }
+
+      .seg button {
+        min-height: 2.1rem;
+        padding: 0 0.65rem;
+        font-size: 0.72rem;
+      }
+
+      .seg button[data-active="true"] {
+        background: var(--fg);
+        border-color: var(--fg);
+        color: var(--bg);
+      }
+
+      .scene-delete {
+        min-height: 2rem;
+        padding: 0 0.8rem;
+        font-size: 0.72rem;
+        color: var(--red);
+      }
+
+      .scene-delete[data-armed="true"] {
+        background: var(--red);
+        border-color: var(--red);
+        color: var(--fg);
+      }
+
+      /* The microphone, as wide as the two pills above it. */
       .mic {
         display: flex;
         align-items: center;
         justify-content: center;
         gap: 0.5rem;
-        width: 100%;
-        margin-top: 0.6rem;
+        width: 12.5rem;
+      }
+
+      .mic[hidden] {
+        display: none;
       }
 
       .mic svg {
@@ -1385,16 +1523,6 @@
         border-color: var(--accent);
       }
 
-      .apps {
-        display: grid;
-        gap: 0.2rem;
-      }
-
-      .apps .row {
-        margin-top: 0.6rem;
-      }
-
-      .apps input[type="range"],
       #screens input[type="range"] {
         margin-top: 0.3rem;
       }
@@ -1433,11 +1561,10 @@
         display: none;
         flex-direction: column;
         justify-content: center;
-        gap: 0.5rem;
         width: var(--deck);
-        height: 24.125rem;
-        /* The buttons sit on the straight part, between the shoulders. */
-        padding: 5rem 0 5rem 0.0625rem;
+        height: 25rem;
+        /* Centred, the buttons sit on the straight part, between the shoulders. */
+        padding: 0 0 0 0.0625rem;
         align-items: center;
       }
 
@@ -1459,14 +1586,61 @@
 
       .deck-hold {
         position: relative;
-        width: 2.9rem;
-        height: 2.9rem;
+        width: 2.5rem;
+        height: 2.5rem;
         min-height: 0;
         padding: 0;
         display: grid;
         place-items: center;
         background: transparent;
         border: 0;
+      }
+
+      .notes-empty {
+        margin: 2rem 0 1.25rem;
+        text-align: center;
+        font-size: 0.85rem;
+        color: var(--muted);
+      }
+
+      .deck-tap {
+        position: relative;
+        display: grid;
+        place-items: center;
+        width: 2.5rem;
+        height: 2.5rem;
+        min-height: 0;
+        padding: 0;
+        background: transparent;
+        border: 0;
+        color: var(--muted);
+        transition: color 200ms ease;
+      }
+
+      .deck-tap > svg {
+        width: 1rem;
+        height: 1rem;
+      }
+
+      .deck-tap[data-on="true"] {
+        color: var(--accent);
+      }
+
+      /* Warmer: the sun fills in. */
+      .deck-tap[data-level="2"] .sun {
+        fill: currentColor;
+      }
+
+      .deck-tap:active {
+        background: transparent;
+      }
+
+      .deck-divider {
+        position: relative;
+        width: 1.25rem;
+        height: 1px;
+        margin: 0.4rem 0;
+        background: var(--line);
       }
 
       /* No pressed look: the flood is the feedback. */
@@ -1755,17 +1929,21 @@
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 4v11M7 10l5 5 5-5M5 20h14" /></svg>
           <span>install app</span>
         </button>
+        <span class="header-end">
         <span class="status" id="status" data-live="false"><i></i><span id="status-text">connecting</span></span>
-        <span class="radio-pills">
-          <button class="radio-pill" id="wifi-pill" data-on="false" data-live="false" aria-label="wi-fi">
-            <i></i>
+        <span class="radios">
+          <button class="radio" id="wifi" data-on="false" data-live="false" aria-label="wi-fi. tap for the network" hidden>
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" aria-hidden="true"><path d="M2.5 9a14 14 0 0 1 19 0M5.8 12.5a9 9 0 0 1 12.4 0M9.2 16a4 4 0 0 1 5.6 0" /><circle cx="12" cy="19.5" r="1" fill="currentColor" /></svg>
-            <span class="truncate" id="wifi-name">wi-fi</span>
           </button>
-          <button class="radio-pill" id="bluetooth-pill" data-on="false" aria-label="bluetooth">
+          <button class="radio" id="bluetooth" data-on="false" aria-label="bluetooth. tap to turn on or off, hold for what's connected" hidden>
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M7 7l10 10-5 4V3l5 4L7 17" /></svg>
-            <span class="truncate" id="bluetooth-name">bluetooth</span>
           </button>
+        </span>
+        <button class="bell" id="bell" data-dnd="false" aria-label="notifications">
+          <svg class="bell-on" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 16V11a6 6 0 0 1 12 0v5l1.5 2h-15zM10 20.5a2 2 0 0 0 4 0" /></svg>
+          <svg class="bell-off" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M8.5 5.6A6 6 0 0 1 18 11v4M6 11v5l-1.5 2H17M10 20.5a2 2 0 0 0 4 0M3 3l18 18" /></svg>
+          <span class="bell-count" id="bell-count" hidden></span>
+        </button>
         </span>
       </header>
 
@@ -1804,76 +1982,32 @@
       <section class="tab" id="tab-control">
         <div class="card" data-card="scenes">
           <p class="label" data-card-handle>scenes</p>
-          <div class="grid-2 scenes" id="scenes" style="margin-top: 1rem"></div>
-          <p class="hint">tap to apply, again to undo · hold to save what's on now into it</p>
+          <div class="scene-row" id="scenes"></div>
+          <p class="hint">tap to apply, again to undo · hold to edit · + for your own</p>
         </div>
 
-        <div class="card" data-card="volume">
-          <div class="row">
-            <p class="label" id="volume-label" data-card-handle>volume</p>
-            <span class="dot" id="volume" style="font-size: 2.4rem">--</span>
+        <!-- Volume and brightness: drag a pill up or down. A tap on volume
+             mutes it. The microphone underneath. -->
+        <div class="levels" data-card="levels">
+          <div class="level" id="volume-pill" data-muted="false" role="slider" aria-label="volume" aria-valuemin="0" aria-valuemax="100">
+            <span class="level-fill"></span>
+            <span class="level-value" id="volume-value">--</span>
+            <span class="level-icon">
+              <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M10 4h8v4h-5v9.5A3.5 3.5 0 1 1 10 14.3z" /></svg>
+            </span>
           </div>
-          <input type="range" id="volume-slider" min="0" max="100" aria-label="volume" />
-          <div class="grid-3" style="margin-top: 0.5rem">
-            <button aria-label="volume down" data-repeat data-action='{"type":"volume","command":"down"}'>
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M5 12h14" /></svg>
-            </button>
-            <button class="toggle" id="mute" data-on="false" data-action='{"type":"volume","command":"mute"}'>mute</button>
-            <button aria-label="volume up" data-repeat data-action='{"type":"volume","command":"up"}'>
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M5 12h14M12 5v14" /></svg>
-            </button>
+          <div class="level" id="brightness-pill" role="slider" aria-label="brightness, every screen" aria-valuemin="5" aria-valuemax="100">
+            <span class="level-fill"></span>
+            <span class="level-value" id="brightness-value">--</span>
+            <span class="level-icon">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="12" r="4" /><path d="M12 2.5v2M12 19.5v2M2.5 12h2M19.5 12h2M5.3 5.3l1.4 1.4M17.3 17.3l1.4 1.4M5.3 18.7l1.4-1.4M17.3 6.7l1.4-1.4" /></svg>
+            </span>
           </div>
           <button class="mic" id="mic" data-muted="false" data-action='{"type":"mic"}' hidden>
             <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 3a3 3 0 0 0-3 3v6a3 3 0 0 0 6 0V6a3 3 0 0 0-3-3zM6 11h2a4 4 0 0 0 8 0h2a6 6 0 0 1-5 5.9V20h-2v-3.1A6 6 0 0 1 6 11z" /></svg>
-            <span id="mic-text">microphone on</span>
+            <span id="mic-text">mic on</span>
           </button>
-          <div id="outputs-block" hidden>
-            <p class="label" style="margin-top: 1.25rem">sound output</p>
-            <div class="pills" id="outputs"></div>
-          </div>
-          <button class="more" id="apps-toggle" hidden></button>
-          <div class="apps" id="apps" hidden></div>
-        </div>
-
-        <div class="card" data-card="brightness">
-          <div class="row">
-            <p class="label" data-card-handle>brightness</p>
-            <span class="dot" id="brightness" style="font-size: 2.4rem">--</span>
-          </div>
-          <div id="screens"></div>
           <p class="hint" id="ddc-hint" hidden></p>
-          <button class="switch" id="night" data-on="false" style="margin-top: 1rem" hidden>
-            <span>night light<small id="night-note">&nbsp;</small></span><i></i>
-          </button>
-          <div id="warmth-row" hidden>
-            <input type="range" id="warmth" min="2500" max="6500" step="100" aria-label="warmth" />
-            <div class="row">
-              <span class="label">warmer</span>
-              <span class="label" id="warmth-value"></span>
-              <span class="label">cooler</span>
-            </div>
-          </div>
-        </div>
-
-        <div class="card" data-card="notifications">
-          <div class="row">
-            <p class="label" data-card-handle>notifications</p>
-            <p class="label" id="notification-count"></p>
-          </div>
-          <div id="notifications-body">
-            <button class="switch" id="dnd" data-on="false" style="margin-top: 1rem">
-              <span>do not disturb<small id="dnd-note">&nbsp;</small></span><i></i>
-            </button>
-            <div class="pills" id="dnd-timers">
-              <button data-mode="hour">for 1 hour</button>
-              <button data-mode="morning">until morning</button>
-            </div>
-            <div class="windows" id="notes"></div>
-            <button class="more" id="notes-more" hidden></button>
-            <p class="hint" id="notes-hint"></p>
-            <button id="notes-clear" style="width: 100%; margin-top: 0.75rem" data-action='{"type":"notifications","op":"clear"}'>clear all</button>
-          </div>
-          <p class="hint" id="notifications-missing" hidden>no notification daemon found: swaync, mako or dunst.</p>
         </div>
       </section>
 
@@ -2057,6 +2191,53 @@
       </div>
     </div>
 
+    <!-- Notifications, from the bell in the header on every tab. -->
+    <div class="sheet notes-sheet" id="notes-sheet" hidden>
+      <div class="row">
+        <p class="label">notifications</p>
+        <p class="label" id="notification-count"></p>
+      </div>
+      <div id="notifications-body">
+        <p class="notes-empty" id="notes-empty" hidden>no new notifications</p>
+        <div class="windows" id="notes"></div>
+        <button class="more" id="notes-more" hidden></button>
+        <p class="hint" id="notes-hint"></p>
+        <button id="notes-clear" style="width: 100%; margin-top: 0.75rem" data-action='{"type":"notifications","op":"clear"}'>clear all</button>
+      </div>
+      <p class="hint" id="notifications-missing" hidden>no notification daemon found: swaync, mako or dunst.</p>
+    </div>
+
+    <!-- A scene's editor: + makes one, holding a scene edits it. "leave" is a
+         setting the scene doesn't touch. -->
+    <div class="sheet scene-sheet" id="scene-sheet" hidden>
+      <div class="row">
+        <p class="label" id="scene-sheet-title">new scene</p>
+        <button class="scene-delete" id="scene-delete" hidden>delete</button>
+      </div>
+      <input class="field scene-name" id="scene-name" maxlength="24" placeholder="name it" autocomplete="off" spellcheck="false" enterkeyhint="done" />
+      <div class="scene-setting">
+        <div class="row"><span>volume</span><span class="seg"><button data-setting="volume" data-value="leave">leave</button><button data-setting="volume" data-value="set">set</button></span></div>
+        <input type="range" id="scene-volume" min="0" max="100" aria-label="scene volume" hidden />
+      </div>
+      <div class="scene-setting">
+        <div class="row"><span>brightness</span><span class="seg"><button data-setting="brightness" data-value="leave">leave</button><button data-setting="brightness" data-value="set">set</button></span></div>
+        <input type="range" id="scene-brightness" min="5" max="100" aria-label="scene brightness" hidden />
+      </div>
+      <div class="scene-setting">
+        <div class="row"><span>do not disturb</span><span class="seg"><button data-setting="dnd" data-value="leave">leave</button><button data-setting="dnd" data-value="on">on</button><button data-setting="dnd" data-value="off">off</button></span></div>
+      </div>
+      <div class="scene-setting">
+        <div class="row"><span>night light</span><span class="seg"><button data-setting="nightLight" data-value="leave">leave</button><button data-setting="nightLight" data-value="off">off</button><button data-setting="nightLight" data-value="warm">warm</button><button data-setting="nightLight" data-value="warmer">warmer</button></span></div>
+      </div>
+      <div class="scene-setting">
+        <div class="row"><span>music</span><span class="seg"><button data-setting="media" data-value="leave">leave</button><button data-setting="media" data-value="play">play</button><button data-setting="media" data-value="pause">pause</button></span></div>
+      </div>
+      <div class="clip-actions">
+        <button id="scene-now">use what's on now</button>
+        <button class="primary" id="scene-save">save</button>
+      </div>
+    </div>
+
     <div class="sheet-backdrop" id="sheet-backdrop" hidden></div>
     <div class="sheet" id="sheet" hidden></div>
 
@@ -2112,20 +2293,21 @@
       </div>
     </nav>
 
-    <!-- Power, on the desk's right edge. Every one is a hold. -->
+    <!-- Power, on the desk's right edge: every one a hold. Then do not disturb and
+         night light, each a tap. -->
     <div class="power-deck" id="power-deck">
       <!-- Half an emerald cut: straight arms slant in from the screen's edge to
            a straight body, its two corners softened. 1 unit = 1px at 16px per
            rem, like the CSS size. Holding an icon floods it with the accent,
            spreading from that icon. -->
-      <svg class="deck-shape" viewBox="0 0 60 386" aria-hidden="true">
+      <svg class="deck-shape" viewBox="0 0 48 400" aria-hidden="true">
         <defs>
-          <clipPath id="deck-clip"><path d="M61 0 L60 0 L10.5 67.1 Q1 80 1 96 L1 290 Q1 306 10.5 318.9 L60 386 L61 386 Z" /></clipPath>
+          <clipPath id="deck-clip"><path d="M49 0 L48 0 L8.6 53.7 Q1 64 1 76.8 L1 323.2 Q1 336 8.6 346.3 L48 400 L49 400 Z" /></clipPath>
         </defs>
-        <path class="deck-fill" d="M61 0 L60 0 L10.5 67.1 Q1 80 1 96 L1 290 Q1 306 10.5 318.9 L60 386 L61 386 Z" />
+        <path class="deck-fill" d="M49 0 L48 0 L8.6 53.7 Q1 64 1 76.8 L1 323.2 Q1 336 8.6 346.3 L48 400 L49 400 Z" />
         <!-- The clip on a group: on the circle it would scale along with it. -->
         <g clip-path="url(#deck-clip)">
-          <circle class="deck-flood" id="deck-flood" cx="30" cy="193" r="0" />
+          <circle class="deck-flood" id="deck-flood" cx="24" cy="200" r="0" />
         </g>
       </svg>
       <button class="deck-hold" data-hold='{"type":"power","op":"shut-down"}' aria-label="hold to shut down">
@@ -2139,6 +2321,15 @@
       </button>
       <button class="deck-hold" data-hold='{"type":"lock"}' aria-label="hold to lock">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="5" y="11" width="14" height="10" rx="2" /><path d="M8 11V7.5a4 4 0 0 1 8 0V11" /></svg>
+      </button>
+      <i class="deck-divider" aria-hidden="true"></i>
+      <!-- Not a hold: a tap turns do not disturb on or off. -->
+      <button class="deck-tap" id="deck-dnd" data-on="false" aria-label="do not disturb" hidden>
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="12" r="8.5" /><path d="M8 12h8" /></svg>
+      </button>
+      <!-- Night light: off, warm, warmer, off, one tap at a time. -->
+      <button class="deck-tap" id="deck-night" data-on="false" data-level="0" aria-label="night light" hidden>
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path class="sun" d="M6.5 16a5.5 5.5 0 0 1 11 0z" /><path d="M3 19.5h18M12 4.5v2.5M5.2 8.8l1.6 1.6M18.8 8.8l-1.6 1.6" /></svg>
       </button>
     </div>
 

@@ -1,6 +1,6 @@
 import { z } from "zod";
 
-import { changeVolume, setAppVolume, setOutput, setVolume, toggleMic, toggleMute } from "./features/audio";
+import { changeVolume, setVolume, toggleMic, toggleMute } from "./features/audio";
 import { CLIPBOARD_LIMIT, setClipboard } from "./features/clipboard";
 import { appName, moveWindow, switchWorkspace, windowCommand } from "./features/desktop";
 import { changeBrightness, setBrightness, setNightLight, WARMTH } from "./features/display";
@@ -25,12 +25,12 @@ import {
   setDndMode,
 } from "./features/notifications";
 import { lockScreen, powerOff } from "./features/power";
-import { openMenu, setRadio } from "./features/radios";
+import { setBluetooth } from "./features/radios";
 import { clickOnScreen } from "./features/screen";
 import { openDownloads, openLink, openReceived } from "./features/send";
 import { quitApp, readTopApps, type TopApp } from "./features/stats";
 import { dispatch, hyprJson, type Client } from "./hypr";
-import { saveScene, tapScene, type Scene } from "./scenes";
+import { deleteScene, putScene, SceneInput, tapScene, type Scene } from "./scenes";
 
 /**
  * Everything the phone is allowed to ask for. Messages are validated against
@@ -74,16 +74,10 @@ export const Action = z.discriminatedUnion("type", [
   }),
   z.strictObject({ type: z.literal("window-move"), address, workspace: workspaceId }),
   z.strictObject({ type: z.literal("scene"), id: z.string().max(24) }),
-  // Saves the current volume, brightness, do not disturb and night light into it.
-  z.strictObject({ type: z.literal("scene-save"), id: z.string().max(24) }),
-  // Where sound goes, by an output id from the state; checked against live outputs.
-  z.strictObject({ type: z.literal("output"), id: z.string().max(512) }),
+  // From the scene editor: a new scene, or one replacing the scene `id` names.
+  z.strictObject({ type: z.literal("scene-put"), scene: SceneInput }),
+  z.strictObject({ type: z.literal("scene-delete"), id: z.string().max(24) }),
   z.strictObject({ type: z.literal("mic") }),
-  z.strictObject({
-    type: z.literal("app-volume"),
-    name: z.string().max(128),
-    level: z.number().int().min(0).max(100),
-  }),
   z.strictObject({ type: z.literal("notifications"), op: z.literal("clear") }),
   z.strictObject({ type: z.literal("dnd"), mode: z.enum(["off", "on", "hour", "morning"]) }),
   z.strictObject({
@@ -91,9 +85,7 @@ export const Action = z.discriminatedUnion("type", [
     op: z.enum(["open", "close"]),
     id: z.number().int().min(0).max(2 ** 32 - 1),
   }),
-  z.strictObject({ type: z.literal("radio"), device: z.enum(["wifi", "bluetooth"]), on: z.boolean() }),
-  // The laptop's own Wi-Fi or Bluetooth menu.
-  z.strictObject({ type: z.literal("radio-menu"), device: z.enum(["wifi", "bluetooth"]) }),
+  z.strictObject({ type: z.literal("bluetooth"), on: z.boolean() }),
 
   // Text only; images, and taking clips to the phone, go over HTTP (/clipboard, /clip).
   z.strictObject({ type: z.literal("clipboard-set"), text: z.string().max(CLIPBOARD_LIMIT) }),
@@ -208,20 +200,19 @@ export async function runAction(
       const now = await tapScene(scene);
       return { changed: true, reply: { type: "toast", text: `${scene.label} ${now}` } };
     }
-    case "scene-save": {
-      // The scenes file watcher picks the change up and sends it to the phones.
-      const saved = await saveScene(scenes, action.id);
-      const label = scenes.find((scene) => scene.id === action.id)?.label;
-      return { changed: true, reply: saved && label ? { type: "toast", text: `saved to ${label}` } : undefined };
+    // The scenes file watcher picks these up and sends them to the phones.
+    case "scene-put": {
+      const saved = await putScene(scenes, action.scene);
+      const text = saved ? `saved ${action.scene.label}` : "that's as many scenes as fit";
+      return { changed: false, reply: { type: "toast", text } };
     }
-    case "output":
-      await setOutput(action.id);
-      break;
+    case "scene-delete": {
+      const label = scenes.find((scene) => scene.id === action.id)?.label;
+      const deleted = await deleteScene(scenes, action.id);
+      return { changed: false, reply: deleted && label ? { type: "toast", text: `deleted ${label}` } : undefined };
+    }
     case "mic":
       await toggleMic();
-      break;
-    case "app-volume":
-      await setAppVolume(action.name, action.level);
       break;
     case "notifications":
       await clearNotifications();
@@ -243,14 +234,9 @@ export async function runAction(
       await closeNote(action.id);
       break;
     }
-    case "radio":
-      await setRadio(action.device, action.on);
+    case "bluetooth":
+      await setBluetooth(action.on);
       break;
-    case "radio-menu":
-      if (!(await openMenu(action.device))) {
-        return { changed: false, reply: { type: "toast", text: `no ${action.device} menu found on the laptop` } };
-      }
-      return { changed: false };
     case "clipboard-set":
       // The phone says so itself, with "open it there" when it's a link.
       await setClipboard(action.text);

@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 
-import { DEFAULT_SCENES, sceneMatches, type Settings } from "../src/scenes";
+import { DEFAULT_SCENES, MAX_SCENES, sceneId, sceneMatches, withScene, type Settings } from "../src/scenes";
 
 const now = (settings: Partial<Settings>): Settings => ({
   volume: 50,
@@ -33,5 +33,41 @@ describe("sceneMatches", () => {
 
   test("never matches a scene that sets nothing comparable", () => {
     expect(sceneMatches({ id: "x", label: "x", media: "play" }, now({}))).toBe(false);
+  });
+});
+
+describe("sceneId", () => {
+  test("makes an id from the name", () => {
+    expect(sceneId("Late night!", [])).toBe("late-night");
+    expect(sceneId("  Work  mode ", [])).toBe("work-mode");
+  });
+
+  test("never repeats one already taken", () => {
+    expect(sceneId("movie", ["movie"])).toBe("movie-2");
+    expect(sceneId("movie", ["movie", "movie-2"])).toBe("movie-3");
+  });
+
+  test("falls back when the name has no letters or digits", () => {
+    expect(sceneId("✨✨", [])).toBe("scene");
+  });
+});
+
+describe("withScene", () => {
+  test("adds a new scene at the end", () => {
+    const next = withScene(DEFAULT_SCENES, { label: "reading", volume: 20, dnd: true })!;
+    expect(next.at(-1)).toEqual({ id: "reading", label: "reading", volume: 20, dnd: true });
+    expect(next.length).toBe(DEFAULT_SCENES.length + 1);
+  });
+
+  test("replaces the scene the id names, keeping its place and id", () => {
+    const next = withScene(DEFAULT_SCENES, { id: "focus", label: "deep focus", volume: 10 })!;
+    expect(next[1]).toEqual({ id: "focus", label: "deep focus", volume: 10 });
+    expect(next.length).toBe(DEFAULT_SCENES.length);
+  });
+
+  test("has no room past the limit", () => {
+    const full = Array.from({ length: MAX_SCENES }, (_, n) => ({ id: `s${n}`, label: `s${n}` }));
+    expect(withScene(full, { label: "one more" })).toBeNull();
+    expect(withScene(full, { id: "s0", label: "renamed" })).not.toBeNull();
   });
 });

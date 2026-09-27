@@ -3,23 +3,27 @@
 Control a Hyprland desktop from your phone over home Wi-Fi. The phone gets a
 web page, installable as an app, with four tabs:
 
-- **desk**: Wi-Fi and Bluetooth pills in the header (tap to toggle, hold to
-  open the laptop's menu); workspaces in use, each with the app on it (swipe to switch, hold
+- **desk**: Wi-Fi and Bluetooth icons in the header (tap Wi-Fi for the
+  network it's on; tap Bluetooth to turn it on or off, hold it for what's
+  connected); workspaces in use, each with the app on it (swipe to switch, hold
   one to move the focused window there); the window list (tap to focus, swipe
   left to close, hold to drag onto a workspace or for fullscreen, float and
-  force kill); and a dock on the
-  right edge to shut down, restart, sleep or lock (hold one until the colour
-  spreading from it fills the dock).
-- **control**: scenes (tap again to undo, hold to save what's on now); volume
-  with speakers, headphones, HDMI or Bluetooth, microphone mute and per-app
-  volume; brightness per screen and night light; notifications (tap to open
-  the app, swipe to dismiss) and do not disturb for an hour or until
-  morning.
+  force kill); and a dock on the right edge to shut down, restart, sleep or
+  lock (hold one until the colour spreading from it fills the dock); a tap
+  there turns do not disturb on or off, and steps night light from off to
+  warm, warmer and off again.
+- **control**: scenes in a row (tap again to undo, hold one to edit or
+  delete it, + to make your own with a name, volume, brightness, do not
+  disturb, night light and play or pause); volume and brightness as two tall
+  sliders (drag to set; tap volume to mute; brightness moves every screen);
+  and the microphone's mute underneath.
 - **bridge**: the clipboard both ways, text or images (what the laptop just
   copied shows live, with the last few before it; send takes what the phone
   copied); links open on the laptop; files go to `~/Downloads` and open
   there, and the latest screenshot and downloads come back to the phone; a
   live preview of the screen, which opens full size to zoom in and click.
+- A bell in the header on every tab counts new notifications; tap it for the
+  list (tap one to open the app, swipe either way to dismiss).
 - While something plays, a mini player floats over the tab bar on every tab
   (tap it for album art, seeking, ±10 seconds and volume). System stats sit
   small just above the tab bar; tap one for its last ten minutes, and for CPU
@@ -121,19 +125,8 @@ anyway.
 focus, night and away. Each scene can set `volume`, `brightness` (every
 screen), `dnd`, `nightLight` (a warmth from 2500 to 6500 kelvin, or `false`)
 and `media` (`"play"` or `"pause"`). Changes to the file apply straight away.
-Holding a scene on the phone saves the current volume, brightness, do not
-disturb and night light into it.
-
-### Wi-Fi and Bluetooth menus
-
-Holding a pill opens a menu on the laptop: your Quickshell control center if
-one is running, otherwise `nm-connection-editor` or `blueman-manager`. To
-open something else, give the command in
-`~/.config/hypr-remote/menus.json`:
-
-```json
-{ "wifi": "kitty nmtui", "bluetooth": "blueberry" }
-```
+The phone edits the same file: + adds a scene (up to 12), and holding one
+opens it to change or delete, with a button to fill in what's on now.
 
 ## Works on
 
@@ -155,8 +148,8 @@ leaves everything else working.
 | Notifications, DND         | swaync, mako or dunst         |                                     |
 | External screen brightness | ddcutil, `/dev/i2c-*` access  |                                     |
 | Night light                | hyprsunset                    | gammastep, wlsunset                 |
-| Wi-Fi pill                 | NetworkManager (`nmcli`)      | iwd, systemd-networkd               |
-| Bluetooth pill             | BlueZ (`bluetoothctl`)        |                                     |
+| Wi-Fi icon                 | NetworkManager (`nmcli`)      | iwd, systemd-networkd               |
+| Bluetooth icon             | BlueZ (`bluetoothctl`)        |                                     |
 | Lock                       | hyprlock                      | swaylock (the button does nothing)  |
 | Sleep, restart, shut down  | systemd (`systemctl`)         |                                     |
 | Typing                     | wtype                         |                                     |
@@ -188,10 +181,10 @@ sudo firewall-cmd --permanent --add-port=4000/tcp --add-port=4443/tcp && sudo fi
   downloads, only ones listed in the state), `/art` and `/ca.crt`. Everything except the page, its assets and the certificate needs
   the pairing token, over HTTPS. It listens on the LAN address only.
 - `src/actions.ts` is the whole list of things the phone can do, validated
-  with zod. Commands run with a fixed argv and no shell. Window addresses,
-  sound outputs and monitor names are checked against live lists.
+  with zod. Commands run with a fixed argv and no shell. Window addresses
+  and monitor names are checked against live lists.
 - `src/state.ts` reads the desktop. Window and workspace changes arrive live
-  from Hyprland's event socket, and volume, sound output and media from
+  from Hyprland's event socket, and volume, the microphone and media from
   `pactl subscribe` and `playerctl --follow` (`src/watch.ts`); the rest is
   polled only while a phone is connected.
 - `public/` is the phone page: plain HTML and JS, no build step. Its font,

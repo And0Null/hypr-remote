@@ -6,7 +6,7 @@ import { installed } from "./run";
 export type Stale = "fast" | "both";
 
 /**
- * Volume, sound output and media changes, the instant they happen, from two
+ * Volume, microphone and media changes, the instant they happen, from two
  * long-lived processes instead of polling. A missing tool just means no events
  * from it; polling still covers it.
  */
@@ -29,14 +29,11 @@ export function watchAudioAndMedia(onChange: (stale: Stale) => void) {
     start() {
       if (followers.length > 0) return;
       followers = [
-        // "Event 'change' on sink #56". Sink changes are volume and mute; the
-        // server changes when the default output does, which the outputs show.
+        // "Event 'change' on sink #56": volume and mute. The server changes
+        // when the default output does, which moves them too; a source is
+        // the microphone.
         follow(["pactl", "subscribe"], (line) => {
-          if (/ on sink #/.test(line)) changed(line.includes("'change'") ? "fast" : "both");
-          // App streams and the microphone.
-          else if (/ on (sink-input|source) #/.test(line)) changed("fast");
-          // A card changing profile (to HDMI, say) changes the outputs.
-          else if (/ on (server|card) #/.test(line)) changed("both");
+          if (/ on (sink|source|server) #/.test(line)) changed("fast");
         }),
         // Prints a line whenever any of these change.
         follow(

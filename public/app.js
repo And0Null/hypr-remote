@@ -102,7 +102,7 @@ function connect() {
     markOpened();
     retry = 500;
     $("status").dataset.live = "true";
-    $("wifi-pill").dataset.live = "true";
+    $("wifi").dataset.live = "true";
     $("status-text").textContent = "live";
     showBanner("");
   };
@@ -120,7 +120,7 @@ function connect() {
 
   socket.onclose = () => {
     $("status").dataset.live = "false";
-    $("wifi-pill").dataset.live = "false";
+    $("wifi").dataset.live = "false";
     $("status-text").textContent = "offline";
     // Refused before ever opening is almost always a stale token.
     if (!everOpened) showBanner("couldn't connect. if the laptop is on, re-scan its qr code to pair again.");
@@ -204,7 +204,7 @@ function wireTabSwipe() {
   // are theirs too.
   const OWN_SWIPE = [
     "#workspaces-card, .window, input, textarea, [data-card-handle], .pad",
-    "#viewer, #presenter, #dock, #sheet, #media-sheet, #sheet-backdrop, #drop-strip, #power-deck",
+    "#viewer, #presenter, #dock, .sheet, #sheet-backdrop, #drop-strip, #power-deck, .scene-row, .level",
   ].join(", ");
   const names = [...document.querySelectorAll("[role=tab]")].map((tab) => /** @type {HTMLElement} */ (tab).dataset.tab);
   /** @type {{ x: number; y: number; at: number } | null} */
@@ -386,7 +386,9 @@ function moveAround(card, target) {
  * @param {HTMLElement} card
  */
 function wireCardHandle(card) {
-  const handle = /** @type {HTMLElement} */ (card.querySelector("[data-card-handle]"));
+  // The volume and brightness pills have no title: they stay where they are.
+  const handle = /** @type {HTMLElement | null} */ (card.querySelector("[data-card-handle]"));
+  if (!handle) return;
   const tab = /** @type {HTMLElement} */ (card.parentElement);
   /** @type {{ x: number; y: number } | null} */
   let start = null;
@@ -606,6 +608,10 @@ function render(next) {
   renderControl();
   renderBridge();
   renderInput();
+  // On every tab: the mini player, the bell, and the stats.
+  renderMedia();
+  renderNotifications();
+  renderNightLight();
   renderStrip();
 }
 
@@ -615,7 +621,6 @@ function renderDesk() {
   renderRadios();
   renderTiles($("workspaces"), { actions: true });
   renderWindows();
-  renderMedia();
 }
 
 /* -------------------------------------------------------------------------- */
@@ -1198,133 +1203,192 @@ function renderControl() {
   renderScenes();
   renderVolume();
   renderBrightness();
-  renderNotifications();
 }
 
 /* -------------------------------------------------------------------------- */
 /* Control: scenes                                                            */
 /* -------------------------------------------------------------------------- */
 
-/**
- * What a scene sets, in a line: "vol 70 · screen 40 · dnd".
- * @param {State["scenes"][number]} scene
- */
-function sceneSummary(scene) {
-  const parts = [];
-  if (scene.volume !== undefined) parts.push(`vol ${scene.volume}`);
-  if (scene.brightness !== undefined) parts.push(`screen ${scene.brightness}`);
-  if (scene.nightLight !== undefined) parts.push(scene.nightLight === false ? "true colour" : "warm");
-  if (scene.dnd !== undefined) parts.push(scene.dnd ? "dnd" : "alerts");
-  if (scene.media !== undefined) parts.push(scene.media);
-  return parts.join(" · ");
-}
-
 function renderScenes() {
-  const grid = $("scenes");
+  const row = $("scenes");
   const key = JSON.stringify(state.scenes.map(({ active: _a, undo: _u, ...scene }) => scene));
-  if (grid.dataset.rendered !== key) {
-    grid.dataset.rendered = key;
-    grid.replaceChildren(
+  if (row.dataset.rendered !== key) {
+    row.dataset.rendered = key;
+    const add = document.createElement("button");
+    add.className = "scene-add";
+    add.textContent = "+";
+    add.setAttribute("aria-label", "new scene");
+    add.addEventListener("click", () => openSceneEditor(null));
+    // The server keeps at most twelve.
+    add.hidden = state.scenes.length >= 12;
+    row.replaceChildren(
       ...state.scenes.map((scene) => {
         const button = document.createElement("button");
-        const name = document.createElement("span");
-        name.className = "truncate";
-        name.textContent = scene.label;
-        const summary = document.createElement("small");
-        summary.className = "truncate";
-        button.append(name, summary);
+        button.className = "truncate";
+        button.textContent = scene.label;
         button.dataset.id = scene.id;
         tapOrHold(button, {
           tap: () => send({ type: "scene", id: scene.id }),
-          hold: () => send({ type: "scene-save", id: scene.id }),
+          hold: () => openSceneEditor(scene),
         });
         return button;
       }),
+      add,
     );
   }
   state.scenes.forEach((scene, index) => {
-    const button = /** @type {HTMLElement} */ (grid.children[index]);
-    button.dataset.active = String(scene.active);
-    /** @type {HTMLElement} */ (button.querySelector("small")).textContent = scene.undo
-      ? "tap to undo"
-      : sceneSummary(scene);
+    /** @type {HTMLElement} */ (row.children[index]).dataset.active = String(scene.active);
   });
 }
 
 /* -------------------------------------------------------------------------- */
-/* Control: volume, microphone, outputs, apps                                 */
+/* Control: the scene editor                                                  */
 /* -------------------------------------------------------------------------- */
 
-let showApps = false;
+/** @typedef {import("../src/scenes").SceneInput} SceneInput */
+
+/** The scene being edited; settings left undefined are ones it leaves alone. @type {SceneInput} */
+let draft = { label: "" };
+// Night light's steps, as the deck has them.
+const WARM = 4500;
+const WARMER = 3000;
+
+/** @param {State["scenes"][number] | null} scene */
+function openSceneEditor(scene) {
+  if (scene) {
+    const { active: _a, undo: _u, ...settings } = scene;
+    draft = settings;
+  } else {
+    draft = { label: "" };
+  }
+  const del = $("scene-delete");
+  del.hidden = !scene;
+  del.dataset.armed = "false";
+  del.textContent = "delete";
+  /** @type {HTMLInputElement} */ ($("scene-name")).value = draft.label;
+  $("scene-sheet-title").textContent = scene ? `edit ${scene.label}` : "new scene";
+  renderSceneEditor();
+  closeSheet();
+  $("scene-sheet").hidden = false;
+  $("sheet-backdrop").hidden = false;
+}
+
+/** Which choice each setting shows: "leave" when the scene doesn't set it. */
+function sceneChoices() {
+  const night = draft.nightLight;
+  return {
+    volume: draft.volume === undefined ? "leave" : "set",
+    brightness: draft.brightness === undefined ? "leave" : "set",
+    dnd: draft.dnd === undefined ? "leave" : draft.dnd ? "on" : "off",
+    nightLight: night === undefined ? "leave" : night === false ? "off" : night > 3750 ? "warm" : "warmer",
+    media: draft.media ?? "leave",
+  };
+}
+
+function renderSceneEditor() {
+  const choices = /** @type {Record<string, string>} */ (sceneChoices());
+  /** @type {NodeListOf<HTMLElement>} */ (document.querySelectorAll("#scene-sheet [data-setting]")).forEach((button) => {
+    button.dataset.active = String(choices[/** @type {string} */ (button.dataset.setting)] === button.dataset.value);
+  });
+  for (const [id, value] of /** @type {[string, number | undefined][]} */ ([
+    ["scene-volume", draft.volume],
+    ["scene-brightness", draft.brightness],
+  ])) {
+    $(id).hidden = value === undefined;
+    if (value !== undefined) setSlider(id, value);
+  }
+}
+
+/** @type {NodeListOf<HTMLElement>} */ (document.querySelectorAll("#scene-sheet [data-setting]")).forEach((button) =>
+  button.addEventListener("click", () => {
+    const value = button.dataset.value;
+    const leave = value === "leave";
+    switch (button.dataset.setting) {
+      case "volume":
+        draft.volume = leave ? undefined : (draft.volume ?? state.volume?.level ?? 50);
+        break;
+      case "brightness":
+        draft.brightness = leave ? undefined : (draft.brightness ?? Math.max(5, state.brightness.screens[0]?.level ?? 60));
+        break;
+      case "dnd":
+        draft.dnd = leave ? undefined : value === "on";
+        break;
+      case "nightLight":
+        draft.nightLight = leave ? undefined : value === "off" ? false : value === "warm" ? WARM : WARMER;
+        break;
+      case "media":
+        draft.media = leave ? undefined : /** @type {"play" | "pause"} */ (value);
+        break;
+    }
+    renderSceneEditor();
+  }),
+);
+
+for (const [id, key] of /** @type {const} */ ([
+  ["scene-volume", "volume"],
+  ["scene-brightness", "brightness"],
+])) {
+  const slider = /** @type {HTMLInputElement} */ ($(id));
+  slider.addEventListener("input", () => {
+    draft[key] = Number(slider.value);
+    const [min, max] = [Number(slider.min), Number(slider.max)];
+    slider.style.setProperty("--fill", `${((Number(slider.value) - min) / (max - min)) * 100}%`);
+  });
+}
+
+$("scene-name").addEventListener("input", () => {
+  draft.label = /** @type {HTMLInputElement} */ ($("scene-name")).value;
+});
+
+// Fills in the volume, brightness, do not disturb and night light as they are.
+$("scene-now").addEventListener("click", () => {
+  if (state.volume) draft.volume = state.volume.level;
+  const level = state.brightness.screens[0]?.level;
+  if (level != null) draft.brightness = Math.max(5, level);
+  if (state.notifications) draft.dnd = state.notifications.dnd;
+  if (state.nightLight) draft.nightLight = state.nightLight.on ? state.nightLight.temperature : false;
+  renderSceneEditor();
+});
+
+$("scene-save").addEventListener("click", () => {
+  const label = draft.label.trim();
+  if (!label) {
+    toast("give it a name");
+    $("scene-name").focus();
+    return;
+  }
+  if (send({ type: "scene-put", scene: { ...draft, label } })) closeSheet();
+});
+
+// Deleting takes a second tap.
+$("scene-delete").addEventListener("click", () => {
+  const del = $("scene-delete");
+  if (del.dataset.armed !== "true") {
+    del.dataset.armed = "true";
+    del.textContent = "tap again";
+    setTimeout(() => {
+      del.dataset.armed = "false";
+      del.textContent = "delete";
+    }, 3000);
+    return;
+  }
+  if (draft.id && send({ type: "scene-delete", id: draft.id })) closeSheet();
+});
+
+/* -------------------------------------------------------------------------- */
+/* Control: volume and the microphone                                         */
+/* -------------------------------------------------------------------------- */
 
 function renderVolume() {
   const volume = state.volume;
-  $("volume").textContent = volume ? pad2(volume.level) : "--";
-  $("volume-label").textContent = volume?.muted ? "volume · muted" : "volume";
-  setSlider("volume-slider", volume?.level);
-  $("volume-slider").dataset.muted = String(Boolean(volume?.muted));
-  $("mute").dataset.on = String(Boolean(volume?.muted));
+  setPill("volume-pill", volume?.level ?? null, volume?.muted ? "muted" : undefined);
+  $("volume-pill").dataset.muted = String(Boolean(volume?.muted));
 
   const mic = $("mic");
   mic.hidden = !state.mic;
   mic.dataset.muted = String(Boolean(state.mic?.muted));
-  $("mic-text").textContent = state.mic?.muted ? "microphone muted" : "microphone on";
-
-  // One output is no choice at all.
-  $("outputs-block").hidden = state.outputs.length < 2;
-  const outputs = $("outputs");
-  const outputsKey = JSON.stringify(state.outputs);
-  if (outputs.dataset.rendered !== outputsKey) {
-    outputs.dataset.rendered = outputsKey;
-    outputs.replaceChildren(
-      ...state.outputs.map((output) => {
-        const button = document.createElement("button");
-        button.textContent = output.label;
-        button.dataset.active = String(output.active);
-        button.dataset.action = JSON.stringify({ type: "output", id: output.id });
-        return button;
-      }),
-    );
-  }
-
-  const apps = state.apps;
-  const toggle = /** @type {HTMLButtonElement} */ ($("apps-toggle"));
-  toggle.hidden = apps.length === 0;
-  toggle.textContent = `${showApps ? "hide" : "show"} ${apps.length} app${apps.length === 1 ? "" : "s"} playing`;
-  $("apps").hidden = !showApps || apps.length === 0;
-  const list = $("apps");
-  // Rebuilt only when apps come or go, so a slider isn't replaced mid-drag.
-  const appsKey = apps.map((app) => app.name).join("\n");
-  if (list.dataset.rendered !== appsKey) {
-    list.dataset.rendered = appsKey;
-    list.replaceChildren(
-      ...apps.flatMap((app, index) => {
-        const row = document.createElement("div");
-        row.className = "row";
-        row.innerHTML = '<span class="label truncate"></span><span class="label"></span>';
-        /** @type {HTMLElement} */ (row.firstElementChild).textContent = app.name;
-        const slider = document.createElement("input");
-        slider.type = "range";
-        slider.min = "0";
-        slider.max = "100";
-        slider.id = `app-${index}`;
-        slider.setAttribute("aria-label", `${app.name} volume`);
-        wireRange(slider, (level) => ({ type: "app-volume", name: app.name, level }));
-        return [row, slider];
-      }),
-    );
-  }
-  apps.forEach((app, index) => {
-    const row = /** @type {HTMLElement} */ (list.children[index * 2]);
-    /** @type {HTMLElement} */ (row.lastElementChild).textContent = app.muted ? "muted" : String(app.level);
-    setSlider(`app-${index}`, app.level);
-  });
+  $("mic-text").textContent = state.mic?.muted ? "mic muted" : "mic on";
 }
-
-$("apps-toggle").addEventListener("click", () => {
-  showApps = !showApps;
-  renderVolume();
-});
 
 /* -------------------------------------------------------------------------- */
 /* Control: brightness and night light                                        */
@@ -1332,44 +1396,9 @@ $("apps-toggle").addEventListener("click", () => {
 
 function renderBrightness() {
   const { screens, ddc } = state.brightness;
-  // With one screen the big number says it all; with more, each row does.
-  const single = screens.length === 1;
-  $("brightness").hidden = !single;
-  $("brightness").textContent = single && screens[0]?.level != null ? pad2(screens[0].level) : "--";
-
-  const list = $("screens");
-  const key = screens.map((screen) => `${screen.id}:${screen.label}`).join();
-  if (list.dataset.rendered !== key) {
-    list.dataset.rendered = key;
-    list.replaceChildren(
-      ...screens.flatMap((screen, index) => {
-        const slider = document.createElement("input");
-        slider.type = "range";
-        slider.min = "5";
-        slider.max = "100";
-        slider.id = `screen-${index}`;
-        slider.setAttribute("aria-label", `${screen.label} brightness`);
-        // The laptop follows the finger; a monitor over DDC takes up to a
-        // second per change, so it gets one change, when the finger lifts.
-        wireRange(slider, (level) => ({ type: "brightness-set", level, screen: screen.id }), {
-          live: screen.id === "laptop",
-        });
-        if (single) return [slider];
-        const row = document.createElement("div");
-        row.className = "row";
-        row.innerHTML = '<span class="label truncate"></span><span class="label"></span>';
-        /** @type {HTMLElement} */ (row.firstElementChild).textContent = screen.label;
-        return [row, slider];
-      }),
-    );
-  }
-  screens.forEach((screen, index) => {
-    setSlider(`screen-${index}`, screen.level);
-    const row = /** @type {HTMLElement | null} */ (document.getElementById(`screen-${index}`)?.previousElementSibling ?? null);
-    if (row?.classList.contains("row")) {
-      /** @type {HTMLElement} */ (row.lastElementChild).textContent = screen.level == null ? "--" : String(screen.level);
-    }
-  });
+  // One pill for every screen; it shows the first (the laptop's, usually).
+  setPill("brightness-pill", screens.find((screen) => screen.level != null)?.level ?? null);
+  $("brightness-pill").hidden = screens.length === 0;
 
   const hint = $("ddc-hint");
   hint.hidden = !ddc;
@@ -1377,28 +1406,101 @@ function renderBrightness() {
     ddc === "missing"
       ? "your other screen needs <code>ddcutil</code> for brightness. run <code>scripts/setup-input.sh</code>, or install it."
       : "<code>ddcutil</code> can't reach your other screen. run <code>scripts/setup-input.sh</code> to allow it.";
-
-  const night = state.nightLight;
-  $("night").hidden = !night;
-  $("night").dataset.on = String(Boolean(night?.on));
-  $("night-note").textContent = night?.on ? `${night.temperature}k` : "off";
-  $("warmth-row").hidden = !night?.on;
-  if (night) {
-    setSlider("warmth", night.temperature);
-    if (!dragging.has("warmth")) $("warmth-value").textContent = `${night.temperature}k`;
-  }
 }
 
 /* -------------------------------------------------------------------------- */
-/* Control: notifications                                                     */
+/* Control: the volume and brightness pills                                   */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * Shows a level on a pill, unless a finger is on it.
+ * @param {string} id
+ * @param {number | null} level
+ * @param {string} [text] shown instead of the number
+ */
+function setPill(id, level, text) {
+  const pill = $(id);
+  if (pill.dataset.dragging === "true") return;
+  const [min, max] = [Number(pill.getAttribute("aria-valuemin")), Number(pill.getAttribute("aria-valuemax"))];
+  pill.style.setProperty("--level", String(level == null ? 0 : (level - min) / (max - min)));
+  pill.setAttribute("aria-valuenow", String(level ?? min));
+  /** @type {HTMLElement} */ (pill.querySelector(".level-value")).textContent = text ?? (level == null ? "--" : String(level));
+}
+
+/**
+ * A pill follows the finger up and down from wherever it lands, like a phone's
+ * own sliders: it moves from the level it had, rather than jumping to the
+ * finger. `live` sends while moving (at most every 80ms); `done` once it lifts;
+ * `tap` when it lifts without having moved.
+ * @param {string} id
+ * @param {{ live?: (level: number) => Action; done: (level: number) => Action; tap?: () => Action }} actions
+ */
+function wirePill(id, { live, done, tap }) {
+  const pill = $(id);
+  const min = Number(pill.getAttribute("aria-valuemin"));
+  const max = Number(pill.getAttribute("aria-valuemax"));
+  /** @type {{ y: number; level: number } | null} */
+  let start = null;
+  let level = min;
+  let sent = 0;
+
+  pill.addEventListener("pointerdown", (event) => {
+    pill.setPointerCapture(event.pointerId);
+    start = { y: event.clientY, level: Number(pill.getAttribute("aria-valuenow") ?? min) };
+    level = start.level;
+  });
+
+  pill.addEventListener("pointermove", (event) => {
+    if (!start) return;
+    const moved = start.y - event.clientY;
+    if (pill.dataset.dragging !== "true" && Math.abs(moved) < 4) return;
+    pill.dataset.dragging = "true";
+    level = Math.round(Math.min(max, Math.max(min, start.level + (moved / pill.clientHeight) * (max - min))));
+    pill.style.setProperty("--level", String((level - min) / (max - min)));
+    pill.setAttribute("aria-valuenow", String(level));
+    /** @type {HTMLElement} */ (pill.querySelector(".level-value")).textContent = String(level);
+    if (live && Date.now() - sent > 80) {
+      sent = Date.now();
+      send(live(level), { buzz: false });
+    }
+  });
+
+  /** @param {boolean} cancelled */
+  const end = (cancelled) => {
+    if (!start) return;
+    const moved = pill.dataset.dragging === "true";
+    start = null;
+    pill.dataset.dragging = "false";
+    if (moved) send(done(level), { buzz: false });
+    else if (tap && !cancelled) send(tap());
+  };
+  pill.addEventListener("pointerup", () => end(false));
+  pill.addEventListener("pointercancel", () => end(true));
+}
+
+wirePill("volume-pill", {
+  live: (level) => ({ type: "volume-set", level }),
+  done: (level) => ({ type: "volume-set", level }),
+  tap: () => ({ type: "volume", command: "mute" }),
+});
+// The laptop follows the finger; every screen (monitors over DDC take up to a
+// second each) gets the level once it lifts.
+wirePill("brightness-pill", {
+  live: (level) => ({ type: "brightness-set", level, screen: "laptop" }),
+  done: (level) => ({ type: "brightness-set", level }),
+});
+
+
+/* -------------------------------------------------------------------------- */
+/* Notifications: the bell in the header, its sheet, and the deck's toggle    */
 /* -------------------------------------------------------------------------- */
 
 const NOTE_CAP = 6;
 let notesKey = "";
 let showAllNotes = false;
 let touchingNote = false;
-/** The note swiped open to show dismiss. @type {number | null} */
-let revealedNote = null;
+/** The deck's do-not-disturb, as last tapped. @type {{ on: boolean; until: number } | null} */
+let dndTapped = null;
 
 /** @param {number} time */
 function timeAgo(time) {
@@ -1409,37 +1511,28 @@ function timeAgo(time) {
   return hours < 24 ? `${hours}h` : `${Math.floor(hours / 24)}d`;
 }
 
-/** @param {number} until */
-function timeLeft(until) {
-  const minutes = Math.max(1, Math.round((until - Date.now()) / 60_000));
-  if (minutes <= 90) return `${minutes}m left`;
-  const end = new Date(until);
-  return `until ${end.getHours()}:${pad2(end.getMinutes())}`;
-}
-
 function renderNotifications() {
   const notifications = state.notifications;
   $("notifications-body").hidden = !notifications;
   $("notifications-missing").hidden = Boolean(notifications);
-  $("notification-count").textContent = notifications ? String(notifications.count) : "";
+  $("deck-dnd").hidden = !notifications;
+  // The badge counts what the sheet lists, not ones from before the remote.
+  const listed = notifications?.list.length ?? 0;
+  $("notification-count").textContent = listed ? String(listed) : "";
+  $("bell-count").hidden = listed === 0;
+  $("bell-count").textContent = listed > 99 ? "99+" : String(listed);
+  $("bell").setAttribute("aria-label", listed ? `notifications, ${listed}` : "notifications");
   if (!notifications) return;
 
-  $("dnd").dataset.on = String(notifications.dnd);
-  $("dnd-note").textContent = notifications.dnd
-    ? notifications.dndUntil
-      ? timeLeft(notifications.dndUntil)
-      : "on until you turn it off"
-    : "off";
-  /** @type {HTMLButtonElement} */ ($("notes-clear")).disabled = notifications.count === 0;
-
-  const { list, count } = notifications;
-  const earlier = count - list.length;
-  $("notes-hint").textContent = [
-    list.length ? "tap to open on the laptop · swipe to dismiss" : "",
-    earlier > 0 ? `${earlier} from before the remote started, not shown` : "",
-  ]
-    .filter(Boolean)
-    .join(" · ");
+  $("bell").dataset.dnd = String(notifications.dnd);
+  // A state sent before a tap reached the laptop mustn't flick it back.
+  const tapped = dndTapped && Date.now() < dndTapped.until ? dndTapped.on : null;
+  $("deck-dnd").dataset.on = String(tapped ?? notifications.dnd);
+  // Only notifications: none at all says so, and hides what acts on them.
+  $("notes-empty").hidden = listed > 0;
+  $("notes-clear").hidden = listed === 0;
+  $("notes-hint").hidden = listed === 0;
+  $("notes-hint").textContent = "tap to open on the laptop · swipe either way to dismiss";
   renderNotes();
 }
 
@@ -1452,7 +1545,7 @@ function renderNotes() {
   more.textContent = showAllNotes ? "show less" : `show ${list.length - shown.length} more`;
 
   // Minutes are part of the key, so "2m" becomes "3m".
-  const key = JSON.stringify([shown.map((note) => [note.id, timeAgo(note.time)]), revealedNote]);
+  const key = JSON.stringify(shown.map((note) => [note.id, timeAgo(note.time)]));
   if (key === notesKey) return;
   notesKey = key;
   $("notes").replaceChildren(
@@ -1460,7 +1553,6 @@ function renderNotes() {
       const row = document.createElement("div");
       row.className = "window note";
       row.innerHTML = `
-        <button class="close">dismiss</button>
         <div class="window-body">
           <div style="min-width: 0">
             <p class="app truncate" style="margin: 0"></p>
@@ -1475,14 +1567,6 @@ function renderNotes() {
       const text = /** @type {HTMLElement} */ (row.querySelector(".text"));
       text.textContent = note.body;
       text.hidden = !note.body;
-      /** @type {HTMLElement} */ (row.querySelector(".close")).addEventListener("click", () => {
-        send({ type: "notification", op: "close", id: note.id });
-        revealedNote = null;
-      });
-      if (revealedNote === note.id) {
-        row.dataset.open = "true";
-        body.style.transform = "translateX(-5.5rem)";
-      }
       attachNoteGestures(row, body, note.id);
       return row;
     }),
@@ -1495,8 +1579,8 @@ $("notes-more").addEventListener("click", () => {
 });
 
 /**
- * Tap to open the app on the laptop; swipe left to reveal dismiss, or all the
- * way to dismiss at once. Windows rows do the same, plus hold and drag.
+ * Tap to open the app on the laptop; swipe either way, past a third of the
+ * row, to dismiss it.
  * @param {HTMLElement} row
  * @param {HTMLElement} body
  * @param {number} id
@@ -1507,14 +1591,12 @@ function attachNoteGestures(row, body, id) {
   /** @type {"press" | "swipe" | "scroll"} */
   let mode = "press";
   let dx = 0;
-  const revealWidth = () => /** @type {HTMLElement} */ (row.querySelector(".close")).offsetWidth;
-  const offset = () => (revealedNote === id ? -revealWidth() : 0);
 
   body.addEventListener("pointerdown", (event) => {
     if (event.button !== 0) return;
     start = { x: event.clientX, y: event.clientY };
     mode = "press";
-    dx = offset();
+    dx = 0;
     touchingNote = true;
     body.setPointerCapture(event.pointerId);
   });
@@ -1531,7 +1613,7 @@ function attachNoteGestures(row, body, id) {
       }
     }
     if (mode === "swipe") {
-      dx = Math.min(0, offset() + mx);
+      dx = mx;
       body.style.transform = `translateX(${dx}px)`;
     }
   });
@@ -1542,25 +1624,13 @@ function attachNoteGestures(row, body, id) {
     start = null;
     touchingNote = false;
     body.dataset.dragging = "false";
-    if (cancelled) {
-      body.style.transform = offset() ? `translateX(${offset()}px)` : "";
-      row.dataset.open = String(Boolean(offset()));
-    } else if (mode === "press") {
-      if (revealedNote !== null) revealedNote = null;
-      else send({ type: "notification", op: "open", id });
-    } else if (mode === "swipe") {
-      if (-dx > row.clientWidth * 0.6) {
-        body.style.transform = "translateX(-100%)";
-        send({ type: "notification", op: "close", id });
-        revealedNote = null;
-      } else if (-dx > revealWidth() / 2) {
-        body.style.transform = `translateX(-${revealWidth()}px)`;
-        revealedNote = id;
-      } else {
-        body.style.transform = "";
-        if (revealedNote === id) revealedNote = null;
-        body.addEventListener("transitionend", () => (row.dataset.open = "false"), { once: true });
-      }
+    if (!cancelled && mode === "press") send({ type: "notification", op: "open", id });
+    if (!cancelled && mode === "swipe" && Math.abs(dx) > row.clientWidth / 3) {
+      body.style.transform = `translateX(${dx < 0 ? -100 : 100}%)`;
+      send({ type: "notification", op: "close", id });
+    } else if (mode === "swipe" || cancelled) {
+      body.style.transform = "";
+      body.addEventListener("transitionend", () => (row.dataset.open = "false"), { once: true });
     }
     renderNotes();
   };
@@ -1574,24 +1644,10 @@ function attachNoteGestures(row, body, id) {
 
 function renderRadios() {
   const { wifi, bluetooth } = state.radios;
-  const wifiPill = $("wifi-pill");
-  wifiPill.hidden = !wifi;
-  wifiPill.dataset.on = String(Boolean(wifi?.on));
-  $("wifi-name").textContent = !wifi?.on ? "off" : (wifi.network ?? "no network");
-  wifiPill.title = wifi?.network ?? "";
-
-  const bluetoothPill = $("bluetooth-pill");
-  bluetoothPill.hidden = !bluetooth;
-  bluetoothPill.dataset.on = String(Boolean(bluetooth?.on));
-  const connected = bluetooth?.connected ?? [];
-  $("bluetooth-name").textContent = !bluetooth?.on
-    ? "off"
-    : connected.length === 0
-      ? "on"
-      : connected.length === 1
-        ? String(connected[0])
-        : `${connected[0]} +${connected.length - 1}`;
-  bluetoothPill.title = connected.join(", ");
+  $("wifi").hidden = !wifi;
+  $("wifi").dataset.on = String(Boolean(wifi?.network));
+  $("bluetooth").hidden = !bluetooth;
+  $("bluetooth").dataset.on = String(Boolean(bluetooth?.on));
 }
 
 function renderBridge() {
@@ -1695,12 +1751,7 @@ function wireRange(slider, toAction, { live = true } = {}) {
  * @param {(level: number) => Action} toAction
  */
 const wireSlider = (id, toAction) => wireRange(/** @type {HTMLInputElement} */ ($(id)), toAction);
-wireSlider("volume-slider", (level) => ({ type: "volume-set", level }));
 wireSlider("media-volume", (level) => ({ type: "volume-set", level }));
-wireSlider("warmth", (temperature) => ({ type: "night-light-set", temperature }));
-$("warmth").addEventListener("input", () => {
-  $("warmth-value").textContent = `${/** @type {HTMLInputElement} */ ($("warmth")).value}k`;
-});
 
 /**
  * A tap does one thing, a half-second hold another (and not the tap too).
@@ -1735,54 +1786,67 @@ function tapOrHold(element, { tap, hold }) {
   element.addEventListener("contextmenu", (event) => event.preventDefault());
 }
 
-$("night").addEventListener("click", () =>
-  send({ type: "night-light", on: $("night").dataset.on !== "true" }),
-);
-
-$("dnd").addEventListener("click", () =>
-  send({ type: "dnd", mode: $("dnd").dataset.on === "true" ? "off" : "on" }),
-);
-/** @type {NodeListOf<HTMLElement>} */ (document.querySelectorAll("#dnd-timers button")).forEach((button) =>
-  button.addEventListener("click", () =>
-    send({ type: "dnd", mode: /** @type {"hour" | "morning"} */ (button.dataset.mode) }),
-  ),
-);
-
-// Wi-Fi off cuts this very connection, and nothing on the phone can bring it
-// back. Turning it off takes a second tap within three seconds.
-/** @type {ReturnType<typeof setTimeout> | null} */
-let wifiArmed = null;
-tapOrHold($("wifi-pill"), {
-  tap() {
-    if (!state?.radios.wifi?.on) {
-      send({ type: "radio", device: "wifi", on: true });
-      return;
-    }
-    if (wifiArmed) {
-      clearTimeout(wifiArmed);
-      wifiArmed = null;
-      send({ type: "radio", device: "wifi", on: false });
-      return;
-    }
-    toast(
-      state.radios.wired
-        ? "tap again to turn wi-fi off"
-        : "tap again to turn wi-fi off — you'll lose this remote",
-    );
-    wifiArmed = setTimeout(() => (wifiArmed = null), 3000);
-  },
-  hold: () => send({ type: "radio-menu", device: "wifi" }),
+// On the desk's deck: one tap, unlike the power holds. It turns the accent
+// colour at once rather than waiting for the laptop to say so.
+$("deck-dnd").addEventListener("click", () => {
+  const on = $("deck-dnd").dataset.on !== "true";
+  if (!send({ type: "dnd", mode: on ? "on" : "off" })) return;
+  dndTapped = { on, until: Date.now() + 2000 };
+  $("deck-dnd").dataset.on = String(on);
+  toast(on ? "do not disturb on" : "do not disturb off");
 });
-tapOrHold($("bluetooth-pill"), {
-  tap: () => send({ type: "radio", device: "bluetooth", on: !state?.radios.bluetooth?.on }),
-  hold: () => send({ type: "radio-menu", device: "bluetooth" }),
+
+// Night light on the deck: each tap steps off → warm → warmer → off.
+const NIGHT_STEPS = [null, 4500, 3000];
+const NIGHT_NAMES = ["night light off", "night light warm", "night light warmer"];
+/** @type {{ level: number; until: number } | null} */
+let nightTapped = null;
+
+/** 0 off, 1 warm, 2 warmer: whichever step the warmth is nearest. */
+function nightLevel() {
+  const night = state?.nightLight;
+  if (!night?.on) return 0;
+  return night.temperature > 3750 ? 1 : 2;
+}
+
+function renderNightLight() {
+  const button = $("deck-night");
+  button.hidden = !state.nightLight;
+  // As with do not disturb: a stale state mustn't undo a tap.
+  const level = nightTapped && Date.now() < nightTapped.until ? nightTapped.level : nightLevel();
+  button.dataset.level = String(level);
+  button.dataset.on = String(level > 0);
+}
+
+$("deck-night").addEventListener("click", () => {
+  const level = (Number($("deck-night").dataset.level) + 1) % NIGHT_STEPS.length;
+  const temperature = NIGHT_STEPS[level];
+  const sent = temperature ? send({ type: "night-light-set", temperature }) : send({ type: "night-light", on: false });
+  if (!sent) return;
+  nightTapped = { level, until: Date.now() + 2000 };
+  renderNightLight();
+  toast(/** @type {string} */ (NIGHT_NAMES[level]));
+});
+
+// Wi-Fi only says what it's on: turning it off would cut this very remote.
+$("wifi").addEventListener("click", () => {
+  const wifi = state?.radios.wifi;
+  toast(!wifi?.on ? "wi-fi is off" : wifi.network ? `on ${wifi.network}` : "wi-fi is on, no network");
+});
+tapOrHold($("bluetooth"), {
+  tap: () => send({ type: "bluetooth", on: !state?.radios.bluetooth?.on }),
+  hold() {
+    const bluetooth = state?.radios.bluetooth;
+    const connected = bluetooth?.connected ?? [];
+    toast(!bluetooth?.on ? "bluetooth is off" : connected.length ? `connected to ${connected.join(", ")}` : "nothing connected");
+  },
 });
 
 // Power on the desk's dock: each is a hold, so a stray tap in a pocket can't
 // lock or power off the laptop. The accent floods the dock from the held icon,
 // and the action happens once it's full; letting go early drains it.
 const HOLD_MS = 1000;
-const DECK = { width: 60, height: 386 }; // the dock's viewBox
+const DECK = { width: 48, height: 400 }; // the dock's viewBox
 const flood = /** @type {SVGCircleElement} */ (/** @type {unknown} */ ($("deck-flood")));
 /** @type {Animation | null} */
 let flooding = null;
@@ -2579,7 +2643,7 @@ let touchingTop = false;
 
 /** @param {NonNullable<typeof sheet>} next */
 function openSheet(next) {
-  $("media-sheet").hidden = true;
+  document.querySelectorAll(".sheet").forEach((panel) => ((/** @type {HTMLElement} */ (panel)).hidden = true));
   sheet = next;
   sheetKey = "";
   topApps = null;
@@ -2597,20 +2661,38 @@ function openSheet(next) {
 function closeSheet() {
   sheet = null;
   clearInterval(topTimer);
-  $("sheet").hidden = true;
-  $("media-sheet").hidden = true;
+  document.querySelectorAll(".sheet").forEach((panel) => ((/** @type {HTMLElement} */ (panel)).hidden = true));
   $("sheet-backdrop").hidden = true;
 }
-$("sheet-backdrop").addEventListener("click", closeSheet);
+// A sheet opened by a hold appears under the finger that's still down; the
+// lift that follows mustn't count as a tap outside it.
+let sheetOpened = 0;
+new MutationObserver(() => {
+  if (!$("sheet-backdrop").hidden) sheetOpened = Date.now();
+}).observe($("sheet-backdrop"), { attributes: true, attributeFilter: ["hidden"] });
+$("sheet-backdrop").addEventListener("click", () => {
+  if (Date.now() - sheetOpened > 400) closeSheet();
+});
+
+/**
+ * One of the sheets written into index.html, rather than drawn into #sheet;
+ * tapping what opened it again closes it.
+ * @param {string} id
+ */
+function toggleSheet(id) {
+  if (!$(id).hidden) return closeSheet();
+  closeSheet();
+  $(id).hidden = false;
+  $("sheet-backdrop").hidden = false;
+}
 
 // The full player: art, seeking, ±10 seconds and volume.
 $("player-open").addEventListener("click", () => {
-  if (!$("media-sheet").hidden) return closeSheet();
-  closeSheet();
-  $("media-sheet").hidden = false;
-  $("sheet-backdrop").hidden = false;
+  toggleSheet("media-sheet");
   tickMedia();
 });
+
+$("bell").addEventListener("click", () => toggleSheet("notes-sheet"));
 
 /**
  * A stat's figure, the words after it, and the range its graph spans.

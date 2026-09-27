@@ -1,10 +1,6 @@
 import {
-  readApps,
   readMicMuted,
-  readOutputs,
   readVolume,
-  type AppVolume,
-  type Output,
   type Volume,
 } from "./features/audio";
 import { readClipboard, type Clipboard } from "./features/clipboard";
@@ -21,8 +17,8 @@ import { sceneMatches, undoableScene, type Scene, type Settings } from "./scenes
 /**
  * Everything the phone shows, split by how often it's worth re-reading.
  *
- * Fast: the desktop, volume, microphone, apps and media — things you change
- * and expect to see move. Slow: outputs, brightness, night light, radios,
+ * Fast: the desktop, volume, microphone and media — things you change
+ * and expect to see move. Slow: brightness, night light, radios,
  * notifications, stats, the clipboard, files to take, and which optional
  * tools are installed — things that change rarely, are slow to read (DDC), or
  * only need to be roughly live.
@@ -30,12 +26,10 @@ import { sceneMatches, undoableScene, type Scene, type Settings } from "./scenes
 export type FastState = DesktopSnapshot & {
   volume: Volume | null;
   mic: { muted: boolean } | null;
-  apps: AppVolume[];
   media: Media | null;
 };
 
 export type SlowState = {
-  outputs: Output[];
   brightness: Brightness;
   nightLight: NightLight;
   notifications: Notifications;
@@ -55,19 +49,17 @@ export type SceneView = Scene & { active: boolean; undo: boolean };
 export type State = FastState & SlowState & { scenes: SceneView[] };
 
 export async function readFast(): Promise<FastState> {
-  const [desktop, volume, micMuted, apps, media] = await Promise.all([
+  const [desktop, volume, micMuted, media] = await Promise.all([
     readDesktop(),
     readVolume(),
     readMicMuted(),
-    readApps(),
     readMedia(),
   ]);
-  return { ...desktop, volume, mic: micMuted === null ? null : { muted: micMuted }, apps, media };
+  return { ...desktop, volume, mic: micMuted === null ? null : { muted: micMuted }, media };
 }
 
 export async function readSlow(): Promise<SlowState> {
-  const [outputs, brightness, nightLight, notifications, radios, stats, input, files] = await Promise.all([
-    readOutputs(),
+  const [brightness, nightLight, notifications, radios, stats, input, files] = await Promise.all([
     readBrightness(),
     readNightLight(),
     readNotifications(),
@@ -76,7 +68,7 @@ export async function readSlow(): Promise<SlowState> {
     readInputSupport(),
     readFiles(),
   ]);
-  return { outputs, brightness, nightLight, notifications, radios, stats, input, clipboard: readClipboard(), files };
+  return { brightness, nightLight, notifications, radios, stats, input, clipboard: readClipboard(), files };
 }
 
 export function viewScenes(scenes: Scene[], fast: FastState, slow: SlowState): SceneView[] {
