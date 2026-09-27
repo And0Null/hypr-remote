@@ -1,3 +1,5 @@
+<img src="docs/logo.png" alt="hypr-remote logo" width="96" />
+
 # hypr-remote
 
 Control a Hyprland desktop from your phone over home Wi-Fi. The phone gets a
