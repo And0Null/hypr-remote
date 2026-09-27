@@ -1,219 +1,135 @@
-<img src="docs/logo.png" alt="hypr-remote logo" width="96" />
+<p align="center">
+  <img src="docs/logo.png" alt="hypr-remote logo" width="96" />
+</p>
 
-# hypr-remote
+<h1 align="center">hypr-remote</h1>
 
-Control a Hyprland desktop from your phone over home Wi-Fi. The phone gets a
-web page, installable as an app, with four tabs:
-
-- **desk**: workspaces in use, each with the app on it (swipe to switch, hold
-  one to move the focused window there); the window list (tap to focus, swipe
-  left to close, hold to drag onto a workspace or for fullscreen, float and
-  force kill); and a dock on the right edge to shut down, restart, sleep or
-  lock (hold one until the colour spreading from it fills the dock); a tap
-  there turns do not disturb on or off, and steps night light from off to
-  warm, warmer and off again.
-- **control**: scenes in a row (tap again to undo, hold one to edit or
-  delete it, + to make your own with a name, volume, brightness, do not
-  disturb, night light and play or pause); volume and brightness as two tall
-  sliders (drag to set; tap volume to mute; brightness moves every screen);
-  and the microphone's mute underneath.
-- **bridge**: the clipboard both ways, text or images (what the laptop just
-  copied shows live, with the last few before it; send takes what the phone
-  copied); links open on the laptop; files go to `~/Downloads` (or the
-  folder chosen in settings) and open there, and the latest screenshot and
-  downloads come back to the phone; a live preview of the screen, which
-  opens full size to zoom in and click.
-- The header is the same on every tab: a green dot by the name while the
-  remote is connected (red when it isn't), then Bluetooth (tap to turn it on
-  or off, hold for what's connected), Wi-Fi (tap for the network), the
-  laptop's battery with its percentage inside, a bell counting new
-  notifications (tap for the list; tap one to open the app, swipe either way
-  to dismiss) and a gear for settings. New notifications and a low battery
-  also pop up while the remote is open.
-- Settings is a page of its own, in a tab for each part of the remote.
-  General: accent colour, text size, the tab it opens on, which tabs show and
-  whether swiping changes tab, which header icons show, system resources,
-  vibration, keeping the screen on, pop-ups and alerts, the laptop's address,
-  the paired phones (remove one, or unpair every phone with a new QR code),
-  install as an app, the version with a check for updates, and a reset.
-  Desk: the dock's side, icons and hold time, night light's warm and warmer
-  (the laptop follows while you drag the one that's on), the empty workspace
-  tile, asking before a swipe closes a window, and what window rows show.
-  Control: where the mini player shows. Bridge: where received files go and
-  whether they open, how many downloads show, and the preview's quality and
-  refresh. Input: pointer speed and acceleration, tap to click, natural
-  scrolling and its speed, and autocorrect. The running-hot alert, where
-  files go and whether they open belong to the laptop, so every phone shares
-  them; the rest is remembered on each phone.
-- While something plays, a mini player floats over the tab bar on every tab
-  (tap it for album art, seeking, ±10 seconds and volume). System stats sit
-  small just above the tab bar; tap one for its last ten minutes, and for CPU
-  and memory the busiest apps (hold one to quit it).
-- **input**: a touchpad filling the screen (tap to click, double-tap and
-  hold to drag, two fingers to scroll either way or pinch to zoom, three to
-  swipe between workspaces), with pointer speed matched to the size of your
-  desk; a keyboard over the phone's own, showing what you typed, with the
-  keys and shortcuts phones lack; and a full-screen presenter with a clock,
-  a timer and the slide, whose "start" picks the key your app needs (never
-  a page-reloading F5 in a browser).
-
-It opens on desk unless settings say otherwise; swipe left or right to change
-tab. Hold a card's title to drag it up or down, or let go for the option to
-hide it; that's remembered on the phone too.
+<p align="center">Control your Hyprland desktop from your phone over home Wi-Fi.<br />A web page you can install as an app. No app store, no cloud.</p>
 
 ![The four tabs: desk, control, bridge and input](docs/tabs.webp)
 
 ![The notifications list, the full player, and the general and desk tabs of settings](docs/settings.webp)
 
-## Run
+## Features
 
-```bash
-bun install
-bun run install-service   # start now and at every login (systemd user service)
-# or, in the foreground:
-bun start
-```
+- **Desk**: switch workspaces, focus, move or close windows, and a dock for shut down, restart, sleep, lock, do not disturb and night light.
+- **Control**: scenes (movie, focus, night, away, or your own), volume and brightness sliders, mic mute.
+- **Bridge**: clipboard both ways (text and images), send links and files to the laptop, grab screenshots and downloads, live screen preview you can click on.
+- **Input**: full-screen touchpad, keyboard with the keys phones lack, and a presenter mode with a timer.
+- **Everywhere**: a mini media player, system stats, notifications, battery, Wi-Fi and Bluetooth in the header.
+- **Settings**: accent colour, text size, which tabs and icons show, and more. Each phone pairs on its own and can be removed on its own.
 
-Scan the QR code from the terminal (`journalctl --user -u hypr-remote`). It
-opens the secure `https://` address, so the pairing code never crosses the
-Wi-Fi in the clear. The phone trades the code for a token of its own, so each
-phone can be removed on its own later. The first time, the browser warns about the certificate:
-continue anyway, or install the certificate (see below) so it never asks. To
-show the code in your own bar or widget, it is always at
-`~/.cache/hypr-remote/pair.png` (and the link at `pair-url`). The phone stays
-paired across restarts. Settings lists the paired phones: remove one there,
-or use "unpair every phone", which also makes a new QR code.
+## Install
+
+You need [Hyprland](https://hyprland.org) and [Bun](https://bun.sh).
+
+1. Clone and install:
+   ```bash
+   git clone https://github.com/uzayr-iqbal-hamid/hypr-remote.git
+   cd hypr-remote
+   bun install
+   ```
+2. Set up typing, clicks, scrolling and external monitor brightness (asks for sudo, works with dnf, pacman, apt and zypper). This also starts hypr-remote at every login:
+   ```bash
+   scripts/setup-input.sh
+   ```
+3. Log out and back in once.
+4. Show the pairing QR code and scan it with your phone:
+   ```bash
+   journalctl --user -u hypr-remote
+   ```
+5. The browser warns about the certificate the first time. Tap **Advanced → Proceed**.
+6. Optional: in the remote, open **settings → install as an app**. It walks you through trusting the certificate so the warning goes away.
+
+Skipping step 2? Run `bun run install-service` instead (or `bun start` to run it in the foreground). Everything except typing, clicks and scrolling still works.
 
 ![Pairing: a phone remote tile with a QR code in a Quickshell control center, next to the phone's desk tab](docs/pairing.webp)
 
-Stop autostart: `systemctl --user disable --now hypr-remote ydotoold`.
+The QR code is also saved at `~/.cache/hypr-remote/pair.png`, so you can show it in your own bar or widget.
 
-### Keyboard, clicks and scrolling
+### Firewall
 
-Moving the pointer works out of the box, through Hyprland. Typing needs
-`wtype`; clicks and scrolling need `ydotool`, which writes to `/dev/uinput`.
-`scripts/setup-input.sh` does all of this with dnf, pacman, apt or zypper,
-along with the external screen brightness setup below. By hand:
+The phone connects on ports **4000** and **4443**. Fedora Workstation and plain Arch need nothing. Otherwise:
 
 ```bash
-sudo pacman -S wtype ydotool          # Arch, CachyOS (Fedora: sudo dnf install wtype ydotool)
-groups | grep -q input || sudo usermod -aG input "$USER"   # then log out and back in
+sudo ufw allow 4000,4443/tcp        # ufw (CachyOS)
+sudo firewall-cmd --permanent --add-port=4000/tcp --add-port=4443/tcp && sudo firewall-cmd --reload   # firewalld
+```
+
+### Uninstall autostart
+
+```bash
+systemctl --user disable --now hypr-remote ydotoold
+```
+
+## Requirements
+
+Works on any distro running Hyprland. It won't start under GNOME, KDE, Sway or other compositors.
+
+The core needs `hyprctl`, `playerctl`, PipeWire (`wpctl`, `pactl`), `brightnessctl`, `wl-clipboard`, `grim`, `xdg-open` and `openssl`. A missing optional tool only turns off its own feature:
+
+| Feature                    | Needs                         | Won't work with       |
+| -------------------------- | ----------------------------- | --------------------- |
+| Notifications, DND         | swaync, mako or dunst         |                       |
+| Night light                | hyprsunset                    | gammastep, wlsunset   |
+| Lock                       | hyprlock                      | swaylock              |
+| Wi-Fi icon                 | NetworkManager (`nmcli`)      | iwd, systemd-networkd |
+| Bluetooth icon             | BlueZ (`bluetoothctl`)        |                       |
+| Typing                     | wtype                         |                       |
+| Clicks, scroll, zoom       | ydotool, `/dev/uinput` access |                       |
+| External screen brightness | ddcutil, `/dev/i2c-*` access  |                       |
+| Clipboard history          | cliphist                      | clipman               |
+| Sleep, restart, shut down  | systemd                       |                       |
+
+<details>
+<summary><b>Manual setup</b> (what <code>setup-input.sh</code> does)</summary>
+
+Typing and clicks:
+
+```bash
+sudo pacman -S wtype ydotool          # Fedora: sudo dnf install wtype ydotool
+groups | grep -q input || sudo usermod -aG input "$USER"
 echo 'KERNEL=="uinput", GROUP="input", MODE="0660", OPTIONS+="static_node=uinput"' \
   | sudo tee /etc/udev/rules.d/80-uinput.rules
 sudo udevadm control --reload && sudo udevadm trigger
-bun run install-service   # adds a ydotoold user service
+bun run install-service               # adds a ydotoold user service
 ```
 
-The udev rule lets every member of the `input` group create virtual input
-devices, which means any program running as your user can inject keystrokes.
-
-### Brightness of external screens
-
-Laptop screens use `brightnessctl`. External monitors are dimmed over DDC/CI,
-which needs `ddcutil` and access to `/dev/i2c-*`. `scripts/setup-input.sh`
-does this too. By hand:
+External monitor brightness:
 
 ```bash
 sudo pacman -S ddcutil                # Fedora: sudo dnf install ddcutil
 echo i2c-dev | sudo tee /etc/modules-load.d/i2c-dev.conf && sudo modprobe i2c-dev
 getent group i2c || sudo groupadd --system i2c
-sudo usermod -aG i2c "$USER"          # then log out and back in
+sudo usermod -aG i2c "$USER"
 echo 'KERNEL=="i2c-[0-9]*", GROUP="i2c", MODE="0660"' | sudo tee /etc/udev/rules.d/80-i2c.rules
 sudo udevadm control --reload && sudo udevadm trigger
 ```
 
-Some monitors have DDC/CI turned off in their own menu. Each change takes
-about a second to reach the screen, so their sliders apply when you let go.
+Log out and back in afterwards. Some monitors have DDC/CI turned off in their own menu.
 
-### Install as an app (HTTPS)
+> [!NOTE]
+> The uinput rule lets any program running as your user inject keystrokes.
 
-The server makes its own certificate authority in `~/.config/hypr-remote/tls`
-and serves HTTPS on 4443. Browsers only install apps once they trust it, so
-"install as an app" in settings walks you through it, with the steps
-for your phone ticking off as you go: download the certificate, install it
-as a CA certificate, reload, then install from the browser menu. Installed on
-Android, the remote shows up in the share sheet: share a link to open it on
-the laptop, text to put it on the laptop's clipboard, or files to send them.
+</details>
 
-Plain HTTP on 4000 only serves the page and the certificate. The remote
-itself refuses it, because anyone on the Wi-Fi could read a token and type
-on your laptop. If HTTPS can't start (say, no `openssl`), everything falls
-back to HTTP with a warning. `HYPR_REMOTE_ALLOW_HTTP=1` allows plain HTTP
-anyway.
+<details>
+<summary><b>Configuration</b></summary>
 
-### Scenes
+- **Ports**: `PORT` (default 4000) and `HTTPS_PORT` (default 4443).
+- **Scenes**: `~/.config/hypr-remote/scenes.json`. Each scene can set `volume`, `brightness`, `dnd`, `nightLight` (2500 to 6500 kelvin, or `false`) and `media` (`"play"` or `"pause"`). Edits apply straight away. You can also edit scenes from the phone.
+- **Plain HTTP**: the remote refuses it so nobody on the Wi-Fi can read your token. `HYPR_REMOTE_ALLOW_HTTP=1` allows it anyway.
+- **Share sheet**: once installed as an app on Android, share links, text or files to the remote to send them to the laptop.
 
-`~/.config/hypr-remote/scenes.json` is created on first run with movie,
-focus, night and away. Each scene can set `volume`, `brightness` (every
-screen), `dnd`, `nightLight` (a warmth from 2500 to 6500 kelvin, or `false`)
-and `media` (`"play"` or `"pause"`). Changes to the file apply straight away.
-The phone edits the same file: + adds a scene (up to 12), and holding one
-opens it to change or delete, with a button to fill in what's on now.
+</details>
 
-## Works on
+<details>
+<summary><b>How it works</b></summary>
 
-Any Linux distro running Hyprland: Fedora, Arch, CachyOS and the rest. It
-needs [Bun](https://bun.sh) and a recent Hyprland. It does not start under
-GNOME, KDE, Sway or other compositors.
+- `src/server.ts` serves the page, a WebSocket and a few HTTP routes over HTTPS, on the LAN address only. Every route except the page and certificate needs a phone's token.
+- `src/devices.ts` stores paired phones as token hashes in `~/.config/hypr-remote/devices.json`.
+- `src/actions.ts` lists everything the phone can do, validated with zod. Commands run with a fixed argv and no shell.
+- `src/state.ts` reads the desktop: live from Hyprland's event socket, `pactl subscribe` and `playerctl --follow`; the rest is polled only while a phone is connected.
+- `public/` is the phone page: plain HTML and JS, no build step. Font: Geist (SIL OFL).
 
-These work anywhere Hyprland runs: workspaces, windows, the pointer, media,
-volume, brightness, clipboard, screen preview, links and files, stats,
-pairing and HTTPS. They use `hyprctl`, `playerctl`, `wpctl` and `pactl`
-(PipeWire), `brightnessctl`, `wl-clipboard`, `grim`, `xdg-open` and
-`openssl`.
-
-The rest depends on your setup. A missing tool turns off its feature and
-leaves everything else working.
-
-| Feature                    | Needs                         | Common alternatives that won't work |
-| -------------------------- | ----------------------------- | ----------------------------------- |
-| Notifications, DND         | swaync, mako or dunst         |                                     |
-| External screen brightness | ddcutil, `/dev/i2c-*` access  |                                     |
-| Night light                | hyprsunset                    | gammastep, wlsunset                 |
-| Wi-Fi icon                 | NetworkManager (`nmcli`)      | iwd, systemd-networkd               |
-| Bluetooth icon             | BlueZ (`bluetoothctl`)        |                                     |
-| Lock                       | hyprlock                      | swaylock (the button does nothing)  |
-| Sleep, restart, shut down  | systemd (`systemctl`)         |                                     |
-| Typing                     | wtype                         |                                     |
-| Clicks, drag, scroll, zoom | ydotool, `/dev/uinput` access |                                     |
-| Clicking on the preview    | ydotool, `/dev/uinput` access |                                     |
-| Clipboard history          | cliphist (else since start)   | clipman                             |
-
-### Firewall
-
-The phone connects on ports 4000 and 4443. Fedora Workstation allows them
-already, and plain Arch has no firewall. With ufw (CachyOS may enable it):
-
-```bash
-sudo ufw allow 4000,4443/tcp
-```
-
-With firewalld on other setups:
-
-```bash
-sudo firewall-cmd --permanent --add-port=4000/tcp --add-port=4443/tcp && sudo firewall-cmd --reload
-```
-
-`PORT` and `HTTPS_PORT` override 4000 and 4443.
-
-## How it works
-
-- `src/server.ts` serves the page, a WebSocket, `/screen`, `/upload`,
-  `/clip` and `/clipboard` (clips each way), `/file` (screenshots and
-  downloads, only ones listed in the state), `/art`, `/ca.crt` and `/pair`.
-  `/pair` trades the pairing code for a phone's own token; everything else
-  except the page, its assets and the certificate needs that token, over
-  HTTPS. It listens on the LAN address only.
-- `src/devices.ts` keeps the paired phones in
-  `~/.config/hypr-remote/devices.json`, as hashes of their tokens only.
-  `src/preferences.ts` keeps the laptop's own settings in
-  `preferences.json` beside it.
-- `src/actions.ts` is the whole list of things the phone can do, validated
-  with zod. Commands run with a fixed argv and no shell. Window addresses
-  and monitor names are checked against live lists.
-- `src/state.ts` reads the desktop. Window and workspace changes arrive live
-  from Hyprland's event socket, and volume, the microphone and media from
-  `pactl subscribe` and `playerctl --follow` (`src/watch.ts`); the rest is
-  polled only while a phone is connected.
-- `public/` is the phone page: plain HTML and JS, no build step. Its font,
-  Geist (SIL OFL), is served from `public/fonts`.
+</details>
