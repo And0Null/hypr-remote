@@ -51,6 +51,11 @@ describe("Action", () => {
       { type: "pointer-move", dx: -12.5, dy: 3 },
       { type: "pointer-click", button: "right" },
       { type: "pointer-scroll", dy: -3 },
+      { type: "pointer-scroll", dy: 0, dx: 2 },
+      { type: "pointer-button", state: "down" },
+      { type: "pointer-zoom", steps: -2 },
+      { type: "slideshow", op: "start" },
+      { type: "key", key: "reopen-tab" },
     ]) {
       accepts(message);
     }
@@ -73,6 +78,8 @@ describe("Action", () => {
     rejects({ type: "key", key: "ctrl+alt+delete" });
     rejects({ type: "key", key: "Return" });
     rejects({ type: "key", key: "toString" });
+    // Slideshow keys are the laptop's to pick, not the phone's.
+    rejects({ type: "key", key: "ctrl-f5" });
   });
 
   test("rejects fields it doesn't know", () => {
@@ -106,6 +113,9 @@ describe("Action", () => {
     rejects({ type: "screen-click", monitor: "eDP-1", x: 1.2, y: 0 });
     rejects({ type: "screen-click", monitor: "eDP-1", x: 0, y: -0.1 });
     rejects({ type: "quit-app", name: "" });
+    rejects({ type: "pointer-zoom", steps: 11 });
+    rejects({ type: "pointer-scroll", dy: 0, dx: 21 });
+    rejects({ type: "pointer-button", state: "click" });
     rejects({ type: "open-received", name: "" });
   });
 

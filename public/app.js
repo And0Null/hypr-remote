@@ -1870,6 +1870,7 @@ function showFrame(url) {
   previewUrl = url;
   /** @type {HTMLImageElement} */ ($("screen")).src = url;
   /** @type {HTMLImageElement} */ ($("viewer-img")).src = url;
+  /** @type {HTMLImageElement} */ ($("present-screen")).src = url;
   $("screen").hidden = false;
   $("screen-empty").hidden = true;
   if (old) URL.revokeObjectURL(old);
@@ -1917,7 +1918,8 @@ function updateScreenPolling() {
   previewTimer = undefined;
   const name = state ? previewMonitor() : null;
   const visible =
-    document.visibilityState === "visible" && (viewerOpen || $("tab-bridge").dataset.active === "true");
+    document.visibilityState === "visible" &&
+    (viewerOpen || presenterOpen || $("tab-bridge").dataset.active === "true");
   if (!name || !visible) {
     $("screen-status").textContent = "paused";
     return;
@@ -2506,8 +2508,6 @@ takeShared().catch(() => toast("couldn't take what was shared"));
 const pad = $("pad");
 /** @type {Map<number, { x: number; y: number }>} */
 const touches = new Map();
-/** @type {{ fingers: number; startTime: number; moved: number; scrollCarry: number } | null} */
-let gesture = null;
 let move = { dx: 0, dy: 0 };
 /** @type {number | null} */
 let moveFrame = null;
@@ -2531,11 +2531,56 @@ function queueMove(dx, dy) {
 // Pointer acceleration: slow drags are precise, fast flicks cross the desk.
 const accelerate = (/** @type {number} */ delta) => delta * (1.4 + Math.min(Math.abs(delta) * 0.12, 2.6));
 
+/**
+ * One touch on the pad, from the first finger down to the last one up.
+ * `kind` is what two fingers turned out to be doing; `dragging` is a
+ * tap-and-drag holding the button down.
+ * @typedef {{
+ *   fingers: number;
+ *   startTime: number;
+ *   moved: number;
+ *   carry: { x: number; y: number };
+ *   kind: "scroll" | "pinch" | null;
+ *   spread: { start: number; last: number; carry: number } | null;
+ *   swipe: { x: number; y: number };
+ *   dragReady: boolean;
+ *   dragging: boolean;
+ * }} Gesture
+ */
+/** @type {Gesture | null} */
+let gesture = null;
+// When the last one-finger tap ended: a touch soon after can drag.
+let lastTap = 0;
+const SCROLL_STEP = 28;
+const ZOOM_STEP = 40;
+
+const clicksOn = () => Boolean(state?.input.clicks);
+
+function spread() {
+  const [a, b] = [...touches.values()];
+  return a && b ? Math.hypot(a.x - b.x, a.y - b.y) : 0;
+}
+
 pad.addEventListener("pointerdown", (event) => {
   pad.setPointerCapture(event.pointerId);
   touches.set(event.pointerId, { x: event.clientX, y: event.clientY });
-  if (!gesture) gesture = { fingers: 0, startTime: Date.now(), moved: 0, scrollCarry: 0 };
+  gesture ??= {
+    fingers: 0,
+    startTime: Date.now(),
+    moved: 0,
+    carry: { x: 0, y: 0 },
+    kind: null,
+    spread: null,
+    swipe: { x: 0, y: 0 },
+    // A second touch right after a tap, as on a laptop's trackpad.
+    dragReady: Date.now() - lastTap < 300,
+    dragging: false,
+  };
   gesture.fingers = Math.max(gesture.fingers, touches.size);
+  if (touches.size === 2) {
+    const distance = spread();
+    gesture.spread = { start: distance, last: distance, carry: 0 };
+  }
 });
 
 pad.addEventListener("pointermove", (event) => {
@@ -2545,33 +2590,87 @@ pad.addEventListener("pointermove", (event) => {
   const dy = event.clientY - last.y;
   touches.set(event.pointerId, { x: event.clientX, y: event.clientY });
   gesture.moved += Math.abs(dx) + Math.abs(dy);
+  const first = event.pointerId === [...touches.keys()][0];
 
-  if (touches.size >= 2) {
-    // Two fingers scroll. Only the first finger's movement counts, or both
-    // fingers would each scroll the page.
-    if (event.pointerId !== [...touches.keys()][0]) return;
-    gesture.scrollCarry += dy;
-    const notches = Math.trunc(gesture.scrollCarry / 28);
-    if (notches) {
-      gesture.scrollCarry -= notches * 28;
-      if (state?.input.clicks) send({ type: "pointer-scroll", dy: -notches }, { buzz: false });
+  // Three fingers: a swipe between workspaces, judged when they lift.
+  if (gesture.fingers >= 3) {
+    if (first) {
+      gesture.swipe.x += dx;
+      gesture.swipe.y += dy;
     }
-  } else {
-    queueMove(accelerate(dx), accelerate(dy));
+    return;
   }
+
+  if (touches.size === 2 && gesture.spread) {
+    const distance = spread();
+    // Fingers moving apart or together pinch; moving together, they scroll.
+    if (!gesture.kind) {
+      if (Math.abs(distance - gesture.spread.start) > 24) gesture.kind = "pinch";
+      else if (gesture.moved > 24) gesture.kind = "scroll";
+    }
+    if (gesture.kind === "pinch") {
+      gesture.spread.carry += distance - gesture.spread.last;
+      gesture.spread.last = distance;
+      const steps = Math.trunc(gesture.spread.carry / ZOOM_STEP);
+      if (steps) {
+        gesture.spread.carry -= steps * ZOOM_STEP;
+        if (clicksOn()) send({ type: "pointer-zoom", steps: clamp(steps, -10, 10) }, { buzz: false });
+      }
+      return;
+    }
+    // Only the first finger's movement counts, or both would scroll.
+    if (gesture.kind !== "scroll" || !first) return;
+    gesture.carry.x += dx;
+    gesture.carry.y += dy;
+    const down = Math.trunc(gesture.carry.y / SCROLL_STEP);
+    const across = Math.trunc(gesture.carry.x / SCROLL_STEP);
+    if (down || across) {
+      gesture.carry.y -= down * SCROLL_STEP;
+      gesture.carry.x -= across * SCROLL_STEP;
+      // The page follows the fingers, as on a phone.
+      if (clicksOn()) {
+        send({ type: "pointer-scroll", dy: clamp(-down, -20, 20), dx: clamp(-across, -20, 20) }, { buzz: false });
+      }
+    }
+    return;
+  }
+
+  // A finger left over after two or three moves nothing.
+  if (gesture.fingers > 1) return;
+  // Pressed before the first move goes out, so the drag starts where the
+  // pointer was.
+  if (gesture.dragReady && !gesture.dragging && clicksOn()) {
+    gesture.dragging = true;
+    navigator.vibrate?.(12);
+    send({ type: "pointer-button", state: "down" }, { buzz: false });
+  }
+  queueMove(accelerate(dx), accelerate(dy));
 });
 
 /** @param {PointerEvent} event */
 function endTouch(event) {
   touches.delete(event.pointerId);
   if (touches.size > 0 || !gesture) return;
+  const ended = gesture;
+  gesture = null;
+
+  if (ended.dragging) {
+    // After the last move has gone out.
+    requestAnimationFrame(() => requestAnimationFrame(() => send({ type: "pointer-button", state: "up" }, { buzz: false })));
+    return;
+  }
+  if (ended.fingers >= 3) {
+    const { x, y } = ended.swipe;
+    // Swiping left brings the next workspace in, as Hyprland's own gesture does.
+    if (Math.abs(x) > 60 && Math.abs(x) > Math.abs(y)) stepWorkspace(x < 0 ? 1 : -1);
+    return;
+  }
   // A short touch that barely moved is a tap: one finger clicks, two
   // right-click.
-  const tap = Date.now() - gesture.startTime < 250 && gesture.moved < 12;
-  if (tap && state?.input.clicks) {
-    send({ type: "pointer-click", button: gesture.fingers >= 2 ? "right" : "left" });
-  }
-  gesture = null;
+  const tap = Date.now() - ended.startTime < 250 && ended.moved < 12;
+  if (!tap) return;
+  if (ended.fingers === 1) lastTap = Date.now();
+  if (clicksOn()) send({ type: "pointer-click", button: ended.fingers >= 2 ? "right" : "left" });
 }
 pad.addEventListener("pointerup", endTouch);
 pad.addEventListener("pointercancel", endTouch);
@@ -2580,28 +2679,53 @@ pad.addEventListener("pointercancel", endTouch);
 // happens. beforeinput tells us what the phone keyboard meant (text,
 // backspace, enter) even when autocorrect rewrites words.
 const typing = /** @type {HTMLInputElement} */ ($("typing"));
+
+// What went to the laptop lately, shown faded so typos can be spotted: the
+// last 40 characters, cleared by enter or after ten quiet seconds.
+let echo = "";
+/** @type {ReturnType<typeof setTimeout> | undefined} */
+let echoTimer;
+/** @param {(text: string) => string} change */
+function updateEcho(change) {
+  echo = change(echo).slice(-40);
+  $("echo-text").textContent = echo;
+  $("dock").dataset.echo = String(echo !== "");
+  // Beside the echo there's only room for the caret.
+  typing.placeholder = echo ? "" : "type here — it goes to the laptop";
+  clearTimeout(echoTimer);
+  echoTimer = setTimeout(() => updateEcho(() => ""), 10_000);
+}
+
+/** @param {string} text */
+function typeOut(text) {
+  send({ type: "type", text }, { buzz: false });
+  updateEcho((shown) => shown + text);
+}
+
 typing.addEventListener("beforeinput", (event) => {
   event.preventDefault();
   switch (event.inputType) {
     case "insertText":
     case "insertReplacementText":
     case "insertFromPaste":
-      if (event.data) send({ type: "type", text: event.data }, { buzz: false });
+      if (event.data) typeOut(event.data);
       break;
     case "insertLineBreak":
     case "insertParagraph":
       send({ type: "key", key: "enter" }, { buzz: false });
+      updateEcho(() => "");
       break;
     case "deleteContentBackward":
     case "deleteWordBackward":
       send({ type: "key", key: "backspace" }, { buzz: false });
+      updateEcho((shown) => shown.slice(0, -1));
       break;
   }
 });
 // Some Android keyboards skip beforeinput for composed text; catch it here.
 typing.addEventListener("input", () => {
   if (typing.value) {
-    send({ type: "type", text: typing.value }, { buzz: false });
+    typeOut(typing.value);
     typing.value = "";
   }
 });
@@ -2609,7 +2733,123 @@ typing.addEventListener("keydown", (event) => {
   if (event.key === "Enter") {
     event.preventDefault();
     send({ type: "key", key: "enter" }, { buzz: false });
+    updateEcho(() => "");
   }
+});
+
+/* The dock: over the phone keyboard, opened from the pad. */
+
+const dock = $("dock");
+
+/** Keeps the dock just above the phone keyboard, where the browser doesn't. */
+function placeDock() {
+  const viewport = window.visualViewport;
+  if (!viewport) return;
+  const covered = Math.max(0, window.innerHeight - viewport.height - viewport.offsetTop);
+  dock.style.bottom = `${covered}px`;
+}
+window.visualViewport?.addEventListener("resize", placeDock);
+window.visualViewport?.addEventListener("scroll", placeDock);
+
+function openDock() {
+  dock.hidden = false;
+  document.body.dataset.dock = "true";
+  // Inside the tap, or the phone won't raise its keyboard.
+  typing.focus();
+  placeDock();
+}
+
+function closeDock() {
+  dock.hidden = true;
+  document.body.dataset.dock = "false";
+  typing.blur();
+}
+
+// The pad's own buttons aren't touches on the pad.
+/** @type {NodeListOf<HTMLElement>} */ (document.querySelectorAll(".pad-tools button")).forEach((button) =>
+  button.addEventListener("pointerdown", (event) => event.stopPropagation()),
+);
+$("keyboard-open").addEventListener("click", openDock);
+$("dock-close").addEventListener("click", closeDock);
+// Tapping a key mustn't take focus from the field, or the keyboard drops.
+/** @type {NodeListOf<HTMLElement>} */ (document.querySelectorAll("#dock button")).forEach((button) =>
+  button.addEventListener("pointerdown", (event) => event.preventDefault()),
+);
+/** @type {HTMLElement} */ (document.querySelector('#dock [data-key="backspace"]')).addEventListener("click", () =>
+  updateEcho((shown) => shown.slice(0, -1)),
+);
+/** @type {HTMLElement} */ (document.querySelector('#dock [data-key="enter"]')).addEventListener("click", () =>
+  updateEcho(() => ""),
+);
+
+/* -------------------------------------------------------------------------- */
+/* Presenting                                                                 */
+/* -------------------------------------------------------------------------- */
+
+const presenter = $("presenter");
+let presenterOpen = false;
+let presentingSince = Date.now();
+/** @type {ReturnType<typeof setInterval> | undefined} */
+let presenterClock;
+/** @type {any} */
+let wakeLock = null;
+
+async function keepAwake() {
+  try {
+    wakeLock = await /** @type {any} */ (navigator).wakeLock?.request("screen");
+  } catch {}
+}
+
+function tickPresenter() {
+  const now = new Date();
+  $("present-clock").textContent = `${now.getHours()}:${pad2(now.getMinutes())}`;
+  const seconds = Math.floor((Date.now() - presentingSince) / 1000);
+  const minutes = Math.floor(seconds / 60);
+  $("present-elapsed").textContent =
+    minutes >= 60 ? `${Math.floor(minutes / 60)}:${pad2(minutes % 60)}:${pad2(seconds % 60)}` : `${minutes}:${pad2(seconds % 60)}`;
+}
+
+function openPresenter() {
+  presenterOpen = true;
+  presenter.hidden = false;
+  presentingSince = Date.now();
+  tickPresenter();
+  presenterClock = setInterval(tickPresenter, 1000);
+  // Back closes it, and the phone stays awake while it's open.
+  history.pushState({ presenter: true }, "");
+  document.documentElement.requestFullscreen?.().catch(() => {});
+  void keepAwake();
+  clearTimeout(previewTimer);
+  updateScreenPolling();
+}
+
+function closePresenter(fromHistory = false) {
+  if (!presenterOpen) return;
+  presenterOpen = false;
+  presenter.hidden = true;
+  clearInterval(presenterClock);
+  wakeLock?.release?.().catch(() => {});
+  wakeLock = null;
+  if (document.fullscreenElement) document.exitFullscreen().catch(() => {});
+  if (!fromHistory && history.state?.presenter) history.back();
+  updateScreenPolling();
+}
+
+$("present-open").addEventListener("click", openPresenter);
+$("present-close").addEventListener("click", () => closePresenter());
+$("present-elapsed").addEventListener("click", () => {
+  presentingSince = Date.now();
+  tickPresenter();
+});
+// Starting the show starts the clock.
+$("present-start").addEventListener("click", () => {
+  presentingSince = Date.now();
+  tickPresenter();
+});
+window.addEventListener("popstate", () => closePresenter(true));
+// A wake lock lapses when the phone locks or the app goes to the background.
+document.addEventListener("visibilitychange", () => {
+  if (presenterOpen && document.visibilityState === "visible") void keepAwake();
 });
 
 if (config) {

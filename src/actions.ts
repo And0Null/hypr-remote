@@ -4,7 +4,19 @@ import { changeVolume, setAppVolume, setOutput, setVolume, toggleMic, toggleMute
 import { CLIPBOARD_LIMIT, setClipboard } from "./features/clipboard";
 import { appName, moveWindow, switchWorkspace, windowCommand } from "./features/desktop";
 import { changeBrightness, setBrightness, setNightLight, WARMTH } from "./features/display";
-import { click, KEYS, movePointer, pressKey, scroll, TEXT_LIMIT, typeText, type KeyName } from "./features/input";
+import {
+  click,
+  KEYS,
+  movePointer,
+  pressButton,
+  pressKey,
+  scroll,
+  startSlideshow,
+  TEXT_LIMIT,
+  typeText,
+  zoom,
+  type KeyName,
+} from "./features/input";
 import { mediaCommand, seekMedia } from "./features/media";
 import {
   clearNotifications,
@@ -113,7 +125,17 @@ export const Action = z.discriminatedUnion("type", [
     dy: z.number().finite().min(-2000).max(2000),
   }),
   z.strictObject({ type: z.literal("pointer-click"), button: z.enum(["left", "right", "middle"]) }),
-  z.strictObject({ type: z.literal("pointer-scroll"), dy: z.number().int().min(-20).max(20) }),
+  z.strictObject({
+    type: z.literal("pointer-scroll"),
+    dy: z.number().int().min(-20).max(20),
+    dx: z.number().int().min(-20).max(20).optional(),
+  }),
+  // Tap-and-drag holds the left button down until the finger lifts.
+  z.strictObject({ type: z.literal("pointer-button"), state: z.enum(["down", "up"]) }),
+  // Pinch on the touchpad: ctrl and the wheel, positive to zoom in.
+  z.strictObject({ type: z.literal("pointer-zoom"), steps: z.number().int().min(-10).max(10) }),
+  // Starts a slideshow with whichever key the window in front needs.
+  z.strictObject({ type: z.literal("slideshow"), op: z.literal("start") }),
 ]);
 
 export type Action = z.infer<typeof Action>;
@@ -279,7 +301,16 @@ export async function runAction(
       await click(action.button);
       return { changed: false };
     case "pointer-scroll":
-      await scroll(action.dy);
+      await scroll(action.dy, action.dx);
+      return { changed: false };
+    case "pointer-button":
+      await pressButton(action.state);
+      return { changed: false };
+    case "pointer-zoom":
+      await zoom(action.steps);
+      return { changed: false };
+    case "slideshow":
+      await startSlideshow();
       return { changed: false };
   }
   return { changed: true };

@@ -20,7 +20,13 @@ web page, installable as an app, with four tabs:
   live preview of the screen, which opens full size to zoom in and click.
 - System stats sit above the tab bar on every tab; tap one for its last ten
   minutes, and for CPU and memory the busiest apps (hold one to quit it).
-- **input**: touchpad, live typing and a presentation clicker.
+- **input**: a touchpad filling the screen (tap to click, double-tap and
+  hold to drag, two fingers to scroll either way or pinch to zoom, three to
+  swipe between workspaces), with pointer speed matched to the size of your
+  desk; a keyboard over the phone's own, showing what you typed, with the
+  keys and shortcuts phones lack; and a full-screen presenter with a clock,
+  a timer and the slide, whose "start" picks the key your app needs (never
+  a page-reloading F5 in a browser).
 
 ![The four tabs: desk, control, bridge and input](docs/tabs.webp)
 
@@ -146,7 +152,7 @@ leaves everything else working.
 | Lock                       | hyprlock                      | swaylock (the button does nothing)  |
 | Sleep, restart, shut down  | systemd (`systemctl`)         |                                     |
 | Typing                     | wtype                         |                                     |
-| Clicks and scrolling       | ydotool, `/dev/uinput` access |                                     |
+| Clicks, drag, scroll, zoom | ydotool, `/dev/uinput` access |                                     |
 | Clicking on the preview    | ydotool, `/dev/uinput` access |                                     |
 | Clipboard history          | cliphist (else since start)   | clipman                             |
 

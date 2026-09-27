@@ -2,7 +2,7 @@
 <html lang="en">
   <head>
     <meta charset="utf-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, interactive-widget=resizes-content" />
     <meta name="theme-color" content="#000000" />
     <meta name="apple-mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-status-bar-style" content="black" />
@@ -1033,10 +1033,12 @@
       }
 
       /* Touchpad */
+      /* The touchpad fills what the screen has left, like a laptop's. */
       .pad {
         position: relative;
         margin-top: 1rem;
-        height: 22rem;
+        height: calc(100dvh - var(--nav) - env(safe-area-inset-bottom) - 13.4rem);
+        min-height: 15rem;
         border-radius: 1.5rem;
         background:
           radial-gradient(circle, #2a2a2a 1px, transparent 1.5px) 0 0 / 1.1rem 1.1rem,
@@ -1051,35 +1053,186 @@
         margin: 0;
         text-align: center;
         font-size: 0.68rem;
+        line-height: 1.6;
         letter-spacing: 0.04em;
         color: var(--faint);
         pointer-events: none;
       }
 
-      .keys {
-        display: grid;
-        grid-template-columns: repeat(4, 1fr);
-        gap: 0.5rem;
-        margin-top: 0.75rem;
+      .pad-tools {
+        position: absolute;
+        top: 0.6rem;
+        right: 0.6rem;
+        display: flex;
+        gap: 0.4rem;
       }
 
-      .keys button {
-        min-height: 2.75rem;
+      .pad-tools button {
+        display: flex;
+        align-items: center;
+        gap: 0.4rem;
+        min-height: 2.4rem;
+        padding: 0 0.8rem;
+        font-size: 0.75rem;
+        background: var(--surface);
+      }
+
+      .pad-tools svg {
+        width: 1.1rem;
+        height: 1.1rem;
+        margin: 0;
+      }
+
+      /* Over the phone keyboard: what you typed, and the keys it lacks. */
+      .dock {
+        position: fixed;
+        left: 0;
+        right: 0;
+        bottom: 0;
+        z-index: 35;
+        padding: 0.6rem 0.75rem;
+        background: var(--bg);
+        border-top: 1px solid var(--line);
+      }
+
+      body[data-dock="true"] nav {
+        display: none;
+      }
+
+      .dock-bar {
+        display: flex;
+        align-items: center;
+        gap: 0.4rem;
+      }
+
+      /* The end of what you typed, clipped on the left as it grows. */
+      .echo {
+        display: none;
+        flex: 1 1 auto;
+        justify-content: flex-end;
+        min-width: 0;
+        overflow: hidden;
+        font-size: 1rem;
+        color: var(--muted);
+        text-transform: none;
+      }
+
+      .echo span {
+        flex: none;
+        white-space: pre;
+      }
+
+      .dock[data-echo="true"] .echo {
+        display: flex;
+      }
+
+      #typing {
+        flex: 1 1 auto;
+        min-width: 0;
+        padding: 0.6rem 0.8rem;
+      }
+
+      .dock[data-echo="true"] #typing {
+        flex: 0 0 4.5rem;
+      }
+
+      #dock-close {
+        flex: none;
+        min-height: 2.6rem;
+        width: 2.6rem;
         padding: 0;
+      }
+
+      .dock-keys {
+        display: grid;
+        grid-template-columns: repeat(8, 1fr);
+        gap: 0.3rem;
+        margin-top: 0.5rem;
+      }
+
+      .dock-more {
+        display: flex;
+        gap: 0.3rem;
+        margin-top: 0.3rem;
+        overflow-x: auto;
+        scrollbar-width: none;
+      }
+
+      .dock-keys button,
+      .dock-more button {
+        min-height: 2.6rem;
+        padding: 0 0.7rem;
         font-size: 0.78rem;
       }
 
-      .slides {
-        display: grid;
-        grid-template-columns: 1fr 1.6fr;
-        gap: 0.6rem;
-        margin-top: 1rem;
+      .dock-keys button {
+        padding: 0;
       }
 
-      .slides button {
-        min-height: 7rem;
-        border-radius: 1.5rem;
-        font-size: 1rem;
+      .dock-more button {
+        flex: none;
+      }
+
+      /* Presenting: back on the left third, next on the rest. */
+      .presenter {
+        position: fixed;
+        inset: 0;
+        z-index: 40;
+        display: grid;
+        grid-template-rows: auto 1fr auto;
+        gap: 0.75rem;
+        padding: max(1rem, env(safe-area-inset-top)) 1rem calc(1rem + env(safe-area-inset-bottom));
+        background: var(--bg);
+      }
+
+      .presenter-top {
+        display: grid;
+        grid-template-columns: 1fr auto 1fr;
+        align-items: center;
+        gap: 0.75rem;
+      }
+
+      .presenter-top .dot {
+        font-size: 1.6rem;
+      }
+
+      #present-screen {
+        width: 7.5rem;
+        aspect-ratio: 16 / 10;
+        object-fit: contain;
+        border-radius: 0.5rem;
+        background: var(--raised);
+      }
+
+      #present-elapsed {
+        justify-self: end;
+        min-height: 0;
+        padding: 0.3rem 0.8rem;
+        border: 0;
+        background: transparent;
+      }
+
+      .presenter-zones {
+        display: grid;
+        grid-template-columns: 1fr 2fr;
+        gap: 0.6rem;
+      }
+
+      .presenter-zones button {
+        height: 100%;
+        border-radius: 1.75rem;
+        font-size: 1.1rem;
+      }
+
+      .presenter-bottom {
+        display: grid;
+        grid-template-columns: repeat(4, 1fr);
+        gap: 0.5rem;
+      }
+
+      .presenter-bottom button {
+        padding: 0;
+        font-size: 0.8rem;
       }
 
       /* Wi-Fi and Bluetooth, in the header on desk; "live" everywhere else. */
@@ -1619,51 +1772,87 @@
       <section class="tab" id="tab-input">
         <div class="card">
           <p class="label">touchpad</p>
-          <div class="pad" id="pad"><p>drag · tap to click · two fingers to scroll · two-finger tap to right-click</p></div>
+          <div class="pad" id="pad">
+            <div class="pad-tools">
+              <button id="present-open">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="4" width="18" height="12" rx="1.5" /><path d="M12 16v4M8 20h8" /></svg>
+                <span>present</span>
+              </button>
+              <button id="keyboard-open" aria-label="keyboard">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><rect x="2.5" y="6" width="19" height="12" rx="2" /><path d="M6 10h.01M10 10h.01M14 10h.01M18 10h.01M7 14h10" /></svg>
+              </button>
+            </div>
+            <p>tap to click · double-tap and hold to drag<br />two fingers scroll or pinch · three swipe workspaces</p>
+          </div>
           <div class="grid-2" style="margin-top: 0.6rem">
             <button data-action='{"type":"pointer-click","button":"left"}' data-needs="clicks">left click</button>
             <button data-action='{"type":"pointer-click","button":"right"}' data-needs="clicks">right click</button>
           </div>
           <p class="hint" id="clicks-hint" hidden>
-            moving works now. clicking and scrolling need ydotool — see the readme, or run
-            <code>bun run install-service</code> after installing it.
+            moving works now. clicking and scrolling need ydotool — run
+            <code>scripts/setup-input.sh</code>, or see the readme.
           </p>
-        </div>
-
-        <div class="card">
-          <p class="label">keyboard</p>
-          <input class="field" id="typing" style="margin-top: 1rem" placeholder="tap here and type — it goes straight to the laptop" autocomplete="off" autocapitalize="off" spellcheck="false" />
-          <div class="keys">
-            <button data-key="escape" data-needs="keyboard">esc</button>
-            <button data-key="tab" data-needs="keyboard">tab</button>
-            <button data-key="backspace" data-needs="keyboard" data-repeat>⌫</button>
-            <button data-key="enter" data-needs="keyboard">enter</button>
-            <button data-key="left" data-needs="keyboard" data-repeat>←</button>
-            <button data-key="up" data-needs="keyboard" data-repeat>↑</button>
-            <button data-key="down" data-needs="keyboard" data-repeat>↓</button>
-            <button data-key="right" data-needs="keyboard" data-repeat>→</button>
-            <button data-key="copy" data-needs="keyboard">copy</button>
-            <button data-key="paste" data-needs="keyboard">paste</button>
-            <button data-key="undo" data-needs="keyboard">undo</button>
-            <button data-key="select-all" data-needs="keyboard">all</button>
-          </div>
-          <p class="hint" id="keyboard-hint" hidden>typing needs <code>wtype</code> — install it with your package manager.</p>
-        </div>
-
-        <div class="card">
-          <p class="label">slides</p>
-          <div class="slides">
-            <button data-key="left" data-needs="keyboard">← back</button>
-            <button class="primary" data-key="right" data-needs="keyboard">next →</button>
-          </div>
-          <div class="grid-3" style="margin-top: 0.6rem">
-            <button data-key="f5" data-needs="keyboard">start</button>
-            <button data-key="blank" data-needs="keyboard">blank</button>
-            <button data-key="escape" data-needs="keyboard">end</button>
-          </div>
         </div>
       </section>
     </main>
+
+    <!-- The phone keyboard's companion: what you typed, and the keys it lacks. -->
+    <div class="dock" id="dock" data-echo="false" hidden>
+      <div class="dock-bar">
+        <span class="echo" id="echo"><span id="echo-text"></span></span>
+        <input class="field" id="typing" placeholder="type here — it goes to the laptop" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" enterkeyhint="enter" />
+        <button id="dock-close" aria-label="close the keyboard">✕</button>
+      </div>
+      <div class="dock-keys">
+        <button data-key="escape" data-needs="keyboard">esc</button>
+        <button data-key="tab" data-needs="keyboard">tab</button>
+        <button data-key="left" data-needs="keyboard" data-repeat>←</button>
+        <button data-key="up" data-needs="keyboard" data-repeat>↑</button>
+        <button data-key="down" data-needs="keyboard" data-repeat>↓</button>
+        <button data-key="right" data-needs="keyboard" data-repeat>→</button>
+        <button data-key="backspace" data-needs="keyboard" data-repeat>⌫</button>
+        <button data-key="enter" data-needs="keyboard">↵</button>
+      </div>
+      <div class="dock-more">
+        <button data-key="copy" data-needs="keyboard">copy</button>
+        <button data-key="paste" data-needs="keyboard">paste</button>
+        <button data-key="cut" data-needs="keyboard">cut</button>
+        <button data-key="undo" data-needs="keyboard">undo</button>
+        <button data-key="select-all" data-needs="keyboard">select all</button>
+        <button data-key="save" data-needs="keyboard">save</button>
+        <button data-key="find" data-needs="keyboard">find</button>
+        <button data-key="switch-window" data-needs="keyboard">alt+tab</button>
+        <button data-key="new-tab" data-needs="keyboard">new tab</button>
+        <button data-key="close-tab" data-needs="keyboard">close tab</button>
+        <button data-key="reopen-tab" data-needs="keyboard">reopen tab</button>
+        <button data-key="refresh" data-needs="keyboard">refresh</button>
+        <button data-key="delete" data-needs="keyboard" data-repeat>del</button>
+        <button data-key="home" data-needs="keyboard">home</button>
+        <button data-key="end" data-needs="keyboard">end</button>
+        <button data-key="page-up" data-needs="keyboard" data-repeat>pg ↑</button>
+        <button data-key="page-down" data-needs="keyboard" data-repeat>pg ↓</button>
+      </div>
+      <p class="hint" id="keyboard-hint" hidden>typing needs <code>wtype</code>: install it with your package manager.</p>
+    </div>
+
+    <!-- Presenting: the whole phone is a clicker. -->
+    <div class="presenter" id="presenter" hidden>
+      <div class="presenter-top">
+        <span class="dot" id="present-clock">--:--</span>
+        <img id="present-screen" alt="" />
+        <button class="dot" id="present-elapsed" aria-label="time presenting; tap to reset">0:00</button>
+      </div>
+      <div class="presenter-zones">
+        <button data-key="left" data-needs="keyboard">← back</button>
+        <button class="primary" data-key="right" data-needs="keyboard">next →</button>
+      </div>
+      <div class="presenter-bottom">
+        <button data-key="blank" data-needs="keyboard">blank</button>
+        <button data-action='{"type":"slideshow","op":"start"}' data-needs="keyboard" id="present-start">start</button>
+        <button data-key="escape" data-needs="keyboard">end</button>
+        <button id="present-close">close</button>
+      </div>
+    </div>
 
     <div class="sheet-backdrop" id="sheet-backdrop" hidden></div>
     <div class="sheet" id="sheet" hidden></div>
