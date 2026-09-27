@@ -3,9 +3,7 @@
 Control a Hyprland desktop from your phone over home Wi-Fi. The phone gets a
 web page, installable as an app, with four tabs:
 
-- **desk**: Wi-Fi and Bluetooth icons in the header (tap Wi-Fi for the
-  network it's on; tap Bluetooth to turn it on or off, hold it for what's
-  connected); workspaces in use, each with the app on it (swipe to switch, hold
+- **desk**: workspaces in use, each with the app on it (swipe to switch, hold
   one to move the focused window there); the window list (tap to focus, swipe
   left to close, hold to drag onto a workspace or for fullscreen, float and
   force kill); and a dock on the right edge to shut down, restart, sleep or
@@ -19,11 +17,32 @@ web page, installable as an app, with four tabs:
   and the microphone's mute underneath.
 - **bridge**: the clipboard both ways, text or images (what the laptop just
   copied shows live, with the last few before it; send takes what the phone
-  copied); links open on the laptop; files go to `~/Downloads` and open
-  there, and the latest screenshot and downloads come back to the phone; a
-  live preview of the screen, which opens full size to zoom in and click.
-- A bell in the header on every tab counts new notifications; tap it for the
-  list (tap one to open the app, swipe either way to dismiss).
+  copied); links open on the laptop; files go to `~/Downloads` (or the
+  folder chosen in settings) and open there, and the latest screenshot and
+  downloads come back to the phone; a live preview of the screen, which
+  opens full size to zoom in and click.
+- The header is the same on every tab: a green dot by the name while the
+  remote is connected (red when it isn't), then Bluetooth (tap to turn it on
+  or off, hold for what's connected), Wi-Fi (tap for the network), the
+  laptop's battery with its percentage inside, a bell counting new
+  notifications (tap for the list; tap one to open the app, swipe either way
+  to dismiss) and a gear for settings. New notifications and a low battery
+  also pop up while the remote is open.
+- Settings is a page of its own, in a tab for each part of the remote.
+  General: accent colour, text size, the tab it opens on, which tabs show and
+  whether swiping changes tab, which header icons show, system resources,
+  vibration, keeping the screen on, pop-ups and alerts, the laptop's address,
+  the paired phones (remove one, or unpair every phone with a new QR code),
+  install as an app, the version with a check for updates, and a reset.
+  Desk: the dock's side, icons and hold time, night light's warm and warmer
+  (the laptop follows while you drag the one that's on), the empty workspace
+  tile, asking before a swipe closes a window, and what window rows show.
+  Control: where the mini player shows. Bridge: where received files go and
+  whether they open, how many downloads show, and the preview's quality and
+  refresh. Input: pointer speed and acceleration, tap to click, natural
+  scrolling and its speed, and autocorrect. The running-hot alert, where
+  files go and whether they open belong to the laptop, so every phone shares
+  them; the rest is remembered on each phone.
 - While something plays, a mini player floats over the tab bar on every tab
   (tap it for album art, seeking, ±10 seconds and volume). System stats sit
   small just above the tab bar; tap one for its last ten minutes, and for CPU
@@ -36,9 +55,9 @@ web page, installable as an app, with four tabs:
   a timer and the slide, whose "start" picks the key your app needs (never
   a page-reloading F5 in a browser).
 
-It opens on desk; swipe left or right to change tab. Hold a card's title to drag it up or down, or let go for
-the option to hide it; tap the title in the header to change the accent
-colour. Both are remembered on that phone.
+It opens on desk unless settings say otherwise; swipe left or right to change
+tab. Hold a card's title to drag it up or down, or let go for the option to
+hide it; that's remembered on the phone too.
 
 ![The four tabs: desk, control, bridge and input](docs/tabs.webp)
 
@@ -52,13 +71,14 @@ bun start
 ```
 
 Scan the QR code from the terminal (`journalctl --user -u hypr-remote`). It
-opens the secure `https://` address, so the pairing token never crosses the
-Wi-Fi in the clear. The first time, the browser warns about the certificate:
+opens the secure `https://` address, so the pairing code never crosses the
+Wi-Fi in the clear. The phone trades the code for a token of its own, so each
+phone can be removed on its own later. The first time, the browser warns about the certificate:
 continue anyway, or install the certificate (see below) so it never asks. To
 show the code in your own bar or widget, it is always at
 `~/.cache/hypr-remote/pair.png` (and the link at `pair-url`). The phone stays
-paired across restarts. Delete `~/.config/hypr-remote/token` to unpair every
-phone.
+paired across restarts. Settings lists the paired phones: remove one there,
+or use "unpair every phone", which also makes a new QR code.
 
 ![Pairing: a phone remote tile with a QR code in a Quickshell control center, next to the phone's desk tab](docs/pairing.webp)
 
@@ -107,14 +127,14 @@ about a second to reach the screen, so their sliders apply when you let go.
 
 The server makes its own certificate authority in `~/.config/hypr-remote/tls`
 and serves HTTPS on 4443. Browsers only install apps once they trust it, so
-the "install app" pill in the header walks you through it, with the steps
+"install as an app" in settings walks you through it, with the steps
 for your phone ticking off as you go: download the certificate, install it
 as a CA certificate, reload, then install from the browser menu. Installed on
 Android, the remote shows up in the share sheet: share a link to open it on
 the laptop, text to put it on the laptop's clipboard, or files to send them.
 
 Plain HTTP on 4000 only serves the page and the certificate. The remote
-itself refuses it, because anyone on the Wi-Fi could read the token and type
+itself refuses it, because anyone on the Wi-Fi could read a token and type
 on your laptop. If HTTPS can't start (say, no `openssl`), everything falls
 back to HTTP with a warning. `HYPR_REMOTE_ALLOW_HTTP=1` allows plain HTTP
 anyway.
@@ -178,8 +198,14 @@ sudo firewall-cmd --permanent --add-port=4000/tcp --add-port=4443/tcp && sudo fi
 
 - `src/server.ts` serves the page, a WebSocket, `/screen`, `/upload`,
   `/clip` and `/clipboard` (clips each way), `/file` (screenshots and
-  downloads, only ones listed in the state), `/art` and `/ca.crt`. Everything except the page, its assets and the certificate needs
-  the pairing token, over HTTPS. It listens on the LAN address only.
+  downloads, only ones listed in the state), `/art`, `/ca.crt` and `/pair`.
+  `/pair` trades the pairing code for a phone's own token; everything else
+  except the page, its assets and the certificate needs that token, over
+  HTTPS. It listens on the LAN address only.
+- `src/devices.ts` keeps the paired phones in
+  `~/.config/hypr-remote/devices.json`, as hashes of their tokens only.
+  `src/preferences.ts` keeps the laptop's own settings in
+  `preferences.json` beside it.
 - `src/actions.ts` is the whole list of things the phone can do, validated
   with zod. Commands run with a fixed argv and no shell. Window addresses
   and monitor names are checked against live lists.

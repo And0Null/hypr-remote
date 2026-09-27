@@ -8,17 +8,22 @@ import QRCode from "qrcode";
 import { CACHE_DIR, CONFIG_DIR } from "./env";
 
 /**
- * Anyone on the same Wi-Fi can reach the port, so every socket and every
- * HTTP endpoint that does something needs this token. Kept on disk so a
- * paired phone stays paired across restarts; delete the file to unpair all.
+ * The pairing code: what the QR code carries. A phone trades it for a token
+ * of its own (see devices.ts); it opens nothing else. Kept on disk so the QR
+ * code stays the same across restarts.
  */
 export async function loadToken(): Promise<string> {
-  const path = join(CONFIG_DIR, "token");
-  const file = Bun.file(path);
+  const file = Bun.file(join(CONFIG_DIR, "token"));
   if (await file.exists()) {
     const saved = (await file.text()).trim();
     if (saved.length >= 16) return saved;
   }
+  return newToken();
+}
+
+/** A fresh pairing code, replacing the old one: its QR code stops working. */
+export async function newToken(): Promise<string> {
+  const path = join(CONFIG_DIR, "token");
   mkdirSync(CONFIG_DIR, { recursive: true, mode: 0o700 });
   const token = randomBytes(18).toString("base64url");
   await Bun.write(path, token);

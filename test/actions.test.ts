@@ -37,6 +37,11 @@ describe("Action", () => {
       { type: "scene-delete", id: "movie" },
       { type: "power", op: "sleep" },
       { type: "bluetooth", on: false },
+      { type: "preferences", change: { hotAlert: false } },
+      { type: "preferences", change: { receiveTo: "desktop", openReceived: false } },
+      { type: "devices" },
+      { type: "device-remove", id: "0123456789ab" },
+      { type: "unpair-all" },
       { type: "clipboard-set", text: "" },
       { type: "open-received", name: "photo.jpg" },
       { type: "open-downloads" },
@@ -67,6 +72,9 @@ describe("Action", () => {
     rejects({ type: "LOCK" });
     rejects({ type: "media", command: "stop" });
     rejects({ type: "bluetooth", on: "true" });
+    rejects({ type: "preferences", change: { receiveTo: "/etc" } });
+    rejects({ type: "preferences", change: { hotAt: 200 } });
+    rejects({ type: "device-remove", id: "../devices" });
     rejects({ type: "window", op: "move", address: "0x1" });
     // Clips reach the phone over /clip now.
     rejects({ type: "clipboard-get" });

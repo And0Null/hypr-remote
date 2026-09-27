@@ -13,7 +13,8 @@ import { read } from "../run";
 export type FileView = { key: string; name: string; size: number; time: number; image: boolean };
 export type Files = { screenshot: FileView | null; downloads: FileView[] };
 
-const DOWNLOADS_SHOWN = 5;
+// The most a phone shows; each phone picks how many in its settings.
+const DOWNLOADS_SHOWN = 10;
 const IMAGES = new Set([".png", ".jpg", ".jpeg", ".webp", ".gif"]);
 // Browsers write these while a download is still arriving.
 const PARTIAL = new Set([".part", ".crdownload", ".download", ".tmp", ".partial"]);

@@ -29,7 +29,9 @@ import { setBluetooth } from "./features/radios";
 import { clickOnScreen } from "./features/screen";
 import { openDownloads, openLink, openReceived } from "./features/send";
 import { quitApp, readTopApps, type TopApp } from "./features/stats";
+import type { DeviceView } from "./devices";
 import { dispatch, hyprJson, type Client } from "./hypr";
+import { Preferences, setPreferences } from "./preferences";
 import { deleteScene, putScene, SceneInput, tapScene, type Scene } from "./scenes";
 
 /**
@@ -94,6 +96,13 @@ export const Action = z.discriminatedUnion("type", [
   // After an upload: open the one file that arrived, or the folder for several.
   z.strictObject({ type: z.literal("open-received"), name: z.string().min(1).max(255) }),
   z.strictObject({ type: z.literal("open-downloads") }),
+  // The laptop's own settings, shared by every phone.
+  z.strictObject({ type: z.literal("preferences"), change: Preferences.partial() }),
+  // Paired phones: list them, remove one, or unpair every one with a new QR
+  // code. The server answers these itself; it knows which phone asked.
+  z.strictObject({ type: z.literal("devices") }),
+  z.strictObject({ type: z.literal("device-remove"), id: z.string().regex(/^[0-9a-f]{12}$/) }),
+  z.strictObject({ type: z.literal("unpair-all") }),
   // A tap on the screen preview, as a fraction of the picture across and down.
   z.strictObject({
     type: z.literal("screen-click"),
@@ -134,7 +143,8 @@ export type Action = z.infer<typeof Action>;
 /** A reply sent back to the one phone that asked, rather than broadcast. */
 export type Reply =
   | { type: "toast"; text: string }
-  | { type: "top"; cpu: TopApp[]; memory: TopApp[] };
+  | { type: "top"; cpu: TopApp[]; memory: TopApp[] }
+  | { type: "devices"; list: DeviceView[]; you: string };
 
 /**
  * Runs an action. Returns whether the desktop state is worth re-reading
@@ -254,6 +264,9 @@ export async function runAction(
     case "open-downloads":
       await openDownloads();
       return { changed: false };
+    case "preferences":
+      await setPreferences(action.change);
+      return { changed: true };
     case "screen-click": {
       const result = await clickOnScreen(action.monitor, action.x, action.y);
       if (result === "no-clicks") {

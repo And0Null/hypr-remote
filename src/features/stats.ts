@@ -134,8 +134,6 @@ async function sampleStats(): Promise<Omit<Stats, "history">> {
 
 const SAMPLE_EVERY = 10_000;
 const KEEP = 60;
-const HOT = 90;
-const COOL = 80;
 
 let latest: Omit<Stats, "history"> | null = null;
 const history: History = { cpu: [], memory: [], battery: [], temperature: [], disk: [] };
@@ -158,20 +156,21 @@ export function record(into: History, sample: Omit<Stats, "history">, keep = KEE
 /**
  * Samples every ten seconds whether or not a phone is connected, so the
  * history is there when one opens it. It's a few small file reads. `onHot`
- * fires once when the laptop reaches 90°C, and again only after it has
- * cooled below 80°C.
+ * fires once when the laptop reaches `hotAt()` (null while the alert is off),
+ * and again only after it has cooled 10°C below that.
  */
-export function startStatsSampler(onHot: (temperature: number) => void) {
+export function startStatsSampler(hotAt: () => number | null, onHot: (temperature: number) => void) {
   let armed = true;
   const tick = async () => {
     latest = await sampleStats();
     record(history, latest);
     const temperature = latest.temperature;
-    if (temperature === null) return;
-    if (armed && temperature >= HOT) {
+    const hot = hotAt();
+    if (temperature === null || hot === null) return;
+    if (armed && temperature >= hot) {
       armed = false;
       onHot(temperature);
-    } else if (temperature < COOL) armed = true;
+    } else if (temperature < hot - 10) armed = true;
   };
   void tick();
   setInterval(() => void tick(), SAMPLE_EVERY);

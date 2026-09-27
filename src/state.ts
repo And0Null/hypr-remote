@@ -12,6 +12,7 @@ import { readMedia, type Media } from "./features/media";
 import { readNotifications, type Notifications } from "./features/notifications";
 import { readRadios, type Radios } from "./features/radios";
 import { readStats, type Stats } from "./features/stats";
+import type { Preferences } from "./preferences";
 import { sceneMatches, undoableScene, type Scene, type Settings } from "./scenes";
 
 /**
@@ -46,7 +47,8 @@ export type SlowState = {
  */
 export type SceneView = Scene & { active: boolean; undo: boolean };
 
-export type State = FastState & SlowState & { scenes: SceneView[] };
+/** `preferences` are the laptop's own settings, shared by every phone. */
+export type State = FastState & SlowState & { scenes: SceneView[]; preferences: Preferences };
 
 export async function readFast(): Promise<FastState> {
   const [desktop, volume, micMuted, media] = await Promise.all([

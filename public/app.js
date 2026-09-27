@@ -16,26 +16,156 @@ const pad2 = (/** @type {number} */ n) => String(n).padStart(2, "0");
 /* Pairing                                                                    */
 /* -------------------------------------------------------------------------- */
 
-// The terminal's QR code carries ?t=<token>. Keep it, then drop it from the
-// address bar so it isn't left in screenshots or history.
+// The terminal's QR code carries ?t=<pairing code>. Keep it, then drop it
+// from the address bar so it isn't left in screenshots or history.
 const params = new URLSearchParams(location.search);
 /**
- * @param {"get" | "set"} action
+ * @param {"get" | "set" | "clear"} action
  * @param {string | null} [value]
  */
 function storage(action, value) {
   try {
     if (action === "get") return localStorage.getItem("hypr-remote-token");
+    if (action === "clear") return localStorage.removeItem("hypr-remote-token");
     localStorage.setItem("hypr-remote-token", /** @type {string} */ (value));
   } catch {
     return null;
   }
 }
-if (params.get("t")) {
-  storage("set", params.get("t"));
-  history.replaceState(null, "", location.pathname);
+
+// A phone trades the QR code's pairing code for a token of its own ("d_…"),
+// which is what it keeps and uses. A code saved by an older version is
+// traded the same way.
+const fromCode = params.get("t");
+if (fromCode) history.replaceState(null, "", location.pathname);
+/** This phone's own token, once it has one. */
+let token = storage("get");
+/** A pairing code still to trade, from the QR code or an older version. */
+let pairingCode = fromCode && !fromCode.startsWith("d_") ? fromCode : token && !token.startsWith("d_") ? token : null;
+if (fromCode?.startsWith("d_")) {
+  token = fromCode;
+  storage("set", token);
 }
-const token = storage("get") ?? params.get("t");
+if (!token?.startsWith("d_")) token = null;
+
+/** What this phone calls itself on the laptop's list of paired phones. */
+async function phoneName() {
+  try {
+    const hints = await /** @type {any} */ (navigator).userAgentData?.getHighEntropyValues(["model"]);
+    if (hints?.model) return String(hints.model);
+  } catch {}
+  const agent = navigator.userAgent;
+  if (/iPhone/.test(agent)) return "iphone";
+  if (/iPad/.test(agent)) return "ipad";
+  if (/Android/.test(agent)) return "android phone";
+  return "browser";
+}
+
+/** Trades the pairing code; false when the laptop turned it down. */
+async function pair() {
+  const response = await fetch("/pair", {
+    method: "POST",
+    headers: { "x-token": pairingCode ?? "", "content-type": "application/json" },
+    body: JSON.stringify({ name: await phoneName(), previous: token }),
+  });
+  if (response.status === 401) {
+    pairingCode = null;
+    return false;
+  }
+  if (!response.ok) throw new Error(`/pair: ${response.status}`);
+  token = String((await response.json()).token);
+  storage("set", token);
+  pairingCode = null;
+  return true;
+}
+
+/**
+ * This phone's settings, from the settings page. Speeds are percent,
+ * warmths kelvin, `holdMs` milliseconds, `previewEvery` seconds; `…Off` lists
+ * what's put away (tabs, top bar icons, dock icons).
+ * @typedef {{
+ *   tab: string; tabsOff: string[]; swipeTabs: boolean; textSize: string;
+ *   stats: boolean; haptics: boolean; awake: boolean;
+ *   headerOff: string[]; bellCount: boolean; notePopups: boolean; batteryAlert: number;
+ *   dockSide: string; holdMs: number; deckOff: string[]; warm: number; warmer: number;
+ *   newTile: boolean; confirmClose: boolean; windowRows: string;
+ *   player: string; downloadsShown: number; previewQuality: string; previewEvery: number;
+ *   speed: number; acceleration: boolean; tapToClick: boolean; naturalScroll: boolean; scrollSpeed: number;
+ *   autocorrect: boolean;
+ * }} PhoneSettings
+ */
+/** @typedef {"swipeTabs" | "stats" | "haptics" | "awake" | "bellCount" | "notePopups" | "newTile" | "confirmClose" | "acceleration" | "tapToClick" | "naturalScroll" | "autocorrect"} SwitchKey */
+/** @typedef {"tabsOff" | "headerOff" | "deckOff"} ListKey */
+const SETTINGS_KEY = "hypr-remote-settings";
+/** @type {PhoneSettings} */
+const DEFAULT_SETTINGS = {
+  tab: "desk",
+  tabsOff: [],
+  swipeTabs: true,
+  textSize: "normal",
+  stats: true,
+  haptics: true,
+  awake: false,
+  headerOff: [],
+  bellCount: true,
+  notePopups: true,
+  batteryAlert: 20,
+  dockSide: "right",
+  holdMs: 1000,
+  deckOff: [],
+  warm: 4500,
+  warmer: 3000,
+  newTile: true,
+  confirmClose: false,
+  windowRows: "both",
+  player: "all",
+  downloadsShown: 5,
+  previewQuality: "light",
+  previewEvery: 1,
+  speed: 100,
+  acceleration: true,
+  tapToClick: true,
+  naturalScroll: true,
+  scrollSpeed: 100,
+  autocorrect: false,
+};
+/** The only values a choice may take; anything else saved falls back. */
+/** @type {Partial<Record<keyof PhoneSettings, (string | number)[]>>} */
+const CHOICES = {
+  tab: ["desk", "control", "bridge", "input"],
+  textSize: ["small", "normal", "large"],
+  batteryAlert: [0, 10, 20, 30],
+  dockSide: ["left", "right"],
+  holdMs: [500, 1000, 2000],
+  windowRows: ["both", "app", "title"],
+  player: ["all", "control", "off"],
+  downloadsShown: [3, 5, 10],
+  previewQuality: ["light", "sharp"],
+  previewEvery: [1, 3, 10],
+};
+/** @type {PhoneSettings} */
+const settings = structuredClone(DEFAULT_SETTINGS);
+try {
+  const saved = JSON.parse(localStorage.getItem(SETTINGS_KEY) ?? "{}");
+  for (const key of /** @type {(keyof PhoneSettings)[]} */ (Object.keys(DEFAULT_SETTINGS))) {
+    const value = saved?.[key];
+    const fits = Array.isArray(DEFAULT_SETTINGS[key])
+      ? Array.isArray(value) && value.every((item) => typeof item === "string")
+      : typeof value === typeof DEFAULT_SETTINGS[key] && (CHOICES[key]?.includes(value) ?? true);
+    if (fits) /** @type {any} */ (settings)[key] = value;
+  }
+} catch {}
+
+function saveSettings() {
+  try {
+    localStorage.setItem(SETTINGS_KEY, JSON.stringify(settings));
+  } catch {}
+}
+
+/** A buzz, unless vibration is off in settings. @param {number | number[]} pattern */
+function vibrate(pattern) {
+  if (settings.haptics) navigator.vibrate?.(pattern);
+}
 
 // On plain http: where the secure version is, and whether this page may use
 // the token at all (not once the laptop runs https).
@@ -68,6 +198,27 @@ let toastTimer;
  * @param {{ label: string; run: () => void }} [action]
  */
 function toast(text, action) {
+  showToast(text, action);
+}
+
+/** Alerts wait for each other rather than one replacing the next. */
+/** @type {[string, { label: string; run: () => void } | undefined][]} */
+const alerts = [];
+
+/**
+ * @param {string} text
+ * @param {{ label: string; run: () => void }} [action]
+ */
+function alertToast(text, action) {
+  if ($("toast").dataset.show === "true") alerts.push([text, action]);
+  else showToast(text, action);
+}
+
+/**
+ * @param {string} text
+ * @param {{ label: string; run: () => void }} [action]
+ */
+function showToast(text, action) {
   const box = $("toast");
   box.textContent = text;
   if (action) {
@@ -81,7 +232,11 @@ function toast(text, action) {
   }
   box.dataset.show = "true";
   clearTimeout(toastTimer);
-  toastTimer = setTimeout(() => (box.dataset.show = "false"), action ? 4000 : 1800);
+  toastTimer = setTimeout(() => {
+    box.dataset.show = "false";
+    const next = alerts.shift();
+    if (next) setTimeout(() => showToast(...next), 250);
+  }, action ? 4000 : 1800);
 }
 
 // Resolves once the first connection opens: shared links wait for it.
@@ -89,7 +244,25 @@ function toast(text, action) {
 let markOpened = () => {};
 const opened = new Promise((resolve) => (markOpened = () => resolve(undefined)));
 
-function connect() {
+/** The dot beside the title: green while live, red while not. @param {"true" | "false"} live */
+function setLive(live) {
+  const dot = $("live-dot");
+  dot.dataset.live = live;
+  dot.setAttribute("aria-label", live === "true" ? "live" : "offline");
+}
+
+async function connect() {
+  if (pairingCode) {
+    try {
+      await pair();
+    } catch {
+      // The laptop is out of reach; try again as a socket would.
+      setLive("false");
+      setTimeout(connect, retry);
+      retry = Math.min(retry * 2, 8000);
+      return;
+    }
+  }
   if (!token) {
     showBanner("not paired. scan the qr code in the terminal, or in the control center on your laptop.");
     return;
@@ -101,9 +274,8 @@ function connect() {
     everOpened = true;
     markOpened();
     retry = 500;
-    $("status").dataset.live = "true";
-    $("wifi").dataset.live = "true";
-    $("status-text").textContent = "live";
+    setLive("true");
+    renderLaptop();
     showBanner("");
   };
 
@@ -116,12 +288,22 @@ function connect() {
       topApps = { cpu: message.cpu, memory: message.memory };
       renderSheet();
     }
+    if (message.type === "devices") {
+      myDevice = message.you;
+      renderDevices(message.list);
+    }
   };
 
-  socket.onclose = () => {
-    $("status").dataset.live = "false";
-    $("wifi").dataset.live = "false";
-    $("status-text").textContent = "offline";
+  socket.onclose = (event) => {
+    setLive("false");
+    renderLaptop();
+    // Removed in settings, here or on another phone, or every phone unpaired.
+    if (event.code === 4001) {
+      storage("clear");
+      token = null;
+      showBanner("this phone was unpaired. scan the qr code on the laptop to pair again.");
+      return;
+    }
     // Refused before ever opening is almost always a stale token.
     if (!everOpened) showBanner("couldn't connect. if the laptop is on, re-scan its qr code to pair again.");
     setTimeout(connect, retry);
@@ -134,11 +316,12 @@ function connect() {
  * @param {{ address: string; httpsPort: number }} config
  */
 function guideToSecure({ address, httpsPort }) {
-  if (!token) return connect(); // shows "not paired"
-  $("status-text").textContent = "offline";
+  const code = pairingCode ?? token;
+  if (!code) return connect(); // shows "not paired"
+  setLive("false");
   showBanner("this is the old http address, which would show your pairing to the whole wi-fi. ");
   const link = document.createElement("a");
-  link.href = `https://${address}:${httpsPort}/?t=${encodeURIComponent(token)}`;
+  link.href = `https://${address}:${httpsPort}/?t=${encodeURIComponent(code)}`;
   link.textContent = "open the secure version";
   $("banner").append(
     link,
@@ -154,9 +337,11 @@ function guideToSecure({ address, httpsPort }) {
 function send(action, { buzz = true } = {}) {
   if (socket?.readyState !== WebSocket.OPEN) return false;
   socket.send(JSON.stringify(action));
-  if (buzz) navigator.vibrate?.(8);
+  if (buzz) vibrate(8);
   return true;
 }
+
+document.body.dataset.stats = settings.stats ? "on" : "off";
 
 /* -------------------------------------------------------------------------- */
 /* Tabs                                                                       */
@@ -167,18 +352,20 @@ function send(action, { buzz = true } = {}) {
  * @param {1 | -1} [from] which side the tab slides in from, after a swipe
  */
 function showTab(name, from) {
-  /** @type {NodeListOf<HTMLElement>} */ (document.querySelectorAll("[role=tab]")).forEach((tab) => {
+  /** @type {NodeListOf<HTMLElement>} */ (document.querySelectorAll("nav [role=tab]")).forEach((tab) => {
     tab.setAttribute("aria-selected", String(tab.dataset.tab === name));
   });
+  const leaving = document.body.dataset.tab;
   /** @type {NodeListOf<HTMLElement>} */ (document.querySelectorAll(".tab")).forEach((section) => {
     section.dataset.active = String(section.id === `tab-${name}`);
   });
   document.body.dataset.tab = name;
-  const tabs = [...document.querySelectorAll("[role=tab]")].map((tab) => /** @type {HTMLElement} */ (tab).dataset.tab);
-  /** @type {HTMLElement} */ (document.querySelector("[role=tablist]")).style.setProperty(
+  /** @type {HTMLElement} */ (document.querySelector("nav [role=tablist]")).style.setProperty(
     "--tab-index",
-    String(Math.max(0, tabs.indexOf(name))),
+    String(Math.max(0, visibleTabs().indexOf(name))),
   );
+  // The mini player can be set to show on control only.
+  if (state && leaving !== name) renderMedia();
   if (from) {
     $(`tab-${name}`).animate(
       [
@@ -191,9 +378,52 @@ function showTab(name, from) {
   updateScreenPolling();
 }
 
-/** @type {NodeListOf<HTMLElement>} */ (document.querySelectorAll("[role=tab]")).forEach((tab) =>
+/** @type {NodeListOf<HTMLElement>} */ (document.querySelectorAll("nav [role=tab]")).forEach((tab) =>
   tab.addEventListener("click", () => showTab(/** @type {string} */ (tab.dataset.tab))),
 );
+
+const TAB_NAMES = ["desk", "control", "bridge", "input"];
+
+/** The tabs in the tab bar: all but the ones put away in settings. */
+function visibleTabs() {
+  const shown = TAB_NAMES.filter((name) => !settings.tabsOff.includes(name));
+  return shown.length ? shown : ["desk"];
+}
+
+/**
+ * Puts the settings to work on everything already on screen. Anything drawn
+ * from the laptop's state is drawn again.
+ */
+function applySettings() {
+  document.documentElement.style.fontSize = { small: "15px", normal: "", large: "17.5px" }[settings.textSize] ?? "";
+  document.body.dataset.stats = settings.stats ? "on" : "off";
+  document.body.dataset.dock = settings.dockSide;
+
+  // The tab bar: only the tabs kept, and off one that was just put away.
+  const shown = visibleTabs();
+  /** @type {NodeListOf<HTMLElement>} */ (document.querySelectorAll("nav [role=tab]")).forEach((tab) => {
+    tab.hidden = !shown.includes(/** @type {string} */ (tab.dataset.tab));
+  });
+  const bar = /** @type {HTMLElement} */ (document.querySelector("nav [role=tablist]"));
+  bar.style.gridTemplateColumns = `repeat(${shown.length}, 1fr)`;
+  bar.style.setProperty("--tabs", String(shown.length));
+  const current = /** @type {string} */ (document.body.dataset.tab);
+  showTab(shown.includes(current) ? current : /** @type {string} */ (shown[0]));
+
+  // The touchpad and keyboard.
+  $("pad-hint").innerHTML = `${settings.tapToClick ? "tap to click · " : ""}double-tap and hold to drag<br />two fingers scroll or pinch · three swipe workspaces`;
+  const typing = $("typing");
+  typing.setAttribute("autocorrect", settings.autocorrect ? "on" : "off");
+  typing.setAttribute("autocapitalize", settings.autocorrect ? "sentences" : "off");
+  typing.setAttribute("spellcheck", String(settings.autocorrect));
+
+  layoutDeck();
+  // Cached renders keyed on the state alone would skip the new settings.
+  windowsKey = "";
+  filesKey = "";
+  $("workspaces").dataset.rendered = "";
+  if (state) render(state);
+}
 /**
  * Swipe left or right anywhere on the page for the next or previous tab,
  * except on what already swipes sideways: the workspaces card, window and
@@ -204,9 +434,8 @@ function wireTabSwipe() {
   // are theirs too.
   const OWN_SWIPE = [
     "#workspaces-card, .window, input, textarea, [data-card-handle], .pad",
-    "#viewer, #presenter, #dock, .sheet, #sheet-backdrop, #drop-strip, #power-deck, .scene-row, .level",
+    "#viewer, #presenter, #dock, .sheet, #sheet-backdrop, #drop-strip, #power-deck, .scene-row, .level, #settings",
   ].join(", ");
-  const names = [...document.querySelectorAll("[role=tab]")].map((tab) => /** @type {HTMLElement} */ (tab).dataset.tab);
   /** @type {{ x: number; y: number; at: number } | null} */
   let start = null;
   document.addEventListener(
@@ -230,7 +459,7 @@ function wireTabSwipe() {
     "touchend",
     (event) => {
       const touch = event.changedTouches[0];
-      if (!start || !touch) return;
+      if (!start || !touch || !settings.swipeTabs) return;
       const dx = touch.clientX - start.x;
       const dy = touch.clientY - start.y;
       const quick = event.timeStamp - start.at < 700;
@@ -238,9 +467,10 @@ function wireTabSwipe() {
       // Clearly sideways and far enough: a scroll that drifts doesn't count.
       if (!quick || Math.abs(dx) < 60 || Math.abs(dx) < Math.abs(dy) * 2) return;
       const step = dx < 0 ? 1 : -1;
-      const next = names[names.indexOf(document.body.dataset.tab) + step];
+      const names = visibleTabs();
+      const next = names[names.indexOf(/** @type {string} */ (document.body.dataset.tab)) + step];
       if (next) showTab(next, step);
-      else navigator.vibrate?.([10, 60, 10]);
+      else vibrate([10, 60, 10]);
     },
     { passive: true },
   );
@@ -248,8 +478,8 @@ function wireTabSwipe() {
 }
 wireTabSwipe();
 
-// Always opens on desk, the home screen, as index.html is written. (Screen
-// polling starts once the page is set up.)
+// Desk until the page is set up; then the tab picked in settings (at the end
+// of this file, since showing a tab starts screen polling).
 document.body.dataset.tab = "desk";
 try {
   localStorage.removeItem("hypr-remote-tab");
@@ -442,7 +672,7 @@ function wireCardHandle(card) {
     holdTimer = setTimeout(() => {
       mode = "held";
       card.dataset.lifted = "true";
-      navigator.vibrate?.(15);
+      vibrate(15);
     }, 450);
   });
 
@@ -547,6 +777,10 @@ const ACCENTS = [
   ["blue", "#2f6bff"],
   ["green", "#1faa59"],
   ["orange", "#ff7a1a"],
+  ["purple", "#8b5cf6"],
+  ["pink", "#e0457b"],
+  ["teal", "#0d9488"],
+  ["gold", "#c98a00"],
 ];
 const ACCENT_KEY = "hypr-remote-accent";
 
@@ -562,15 +796,6 @@ try {
 } catch {}
 setAccent(accent);
 
-$("title").addEventListener("click", () => {
-  accent = (accent + 1) % ACCENTS.length;
-  setAccent(accent);
-  const name = /** @type {string} */ (ACCENTS[accent]?.[0]);
-  try {
-    localStorage.setItem(ACCENT_KEY, name);
-  } catch {}
-  toast(name);
-});
 
 /* -------------------------------------------------------------------------- */
 /* Rendering                                                                  */
@@ -613,6 +838,7 @@ function render(next) {
   renderNotifications();
   renderNightLight();
   renderStrip();
+  layoutDeck();
 }
 
 function renderDesk() {
@@ -631,11 +857,12 @@ function renderDesk() {
  * The workspaces worth a tile: every one with windows or on a screen, then the
  * lowest free number, to start a new one.
  */
-function workspaceIds() {
+/** Workspaces in use, and the first free one ("new") unless `free` is false. */
+function workspaceIds(free = true) {
   const ids = new Set(state.workspaces.filter((w) => w.windows > 0).map((w) => w.id));
   for (const monitor of state.monitors) if (monitor.workspace > 0) ids.add(monitor.workspace);
   if (state.activeWorkspace && state.activeWorkspace > 0) ids.add(state.activeWorkspace);
-  return [...ids, freeWorkspace(ids)].sort((a, b) => a - b);
+  return [...ids, ...(free ? [freeWorkspace(ids)] : [])].sort((a, b) => a - b);
 }
 
 /** @param {Set<number>} taken */
@@ -671,7 +898,8 @@ const workspaceApp = (id) => state.windows.find((w) => w.workspace === id)?.app 
  * @param {{ actions: boolean }} options
  */
 function renderTiles(grid, { actions }) {
-  const ids = workspaceIds();
+  // Dropping a window always has "new"; the desk's card, as settings say.
+  const ids = workspaceIds(!actions || settings.newTile);
   const occupied = new Set(state.workspaces.filter((w) => w.windows > 0).map((w) => w.id));
   const elsewhere = new Set(state.monitors.filter((m) => !m.focused).map((m) => m.workspace));
   /** @param {number} id */
@@ -778,7 +1006,7 @@ function stepWorkspace(direction) {
   const occupied = state.workspaces.filter((w) => w.windows > 0).map((w) => w.id);
   const next = direction > 0 ? occupied.find((id) => id > current) : occupied.findLast((id) => id < current);
   if (next) send({ type: "workspace", id: next });
-  else navigator.vibrate?.([10, 60, 10]);
+  else vibrate([10, 60, 10]);
 }
 
 /** @param {number} id */
@@ -859,6 +1087,9 @@ function renderWindows() {
       /** @type {HTMLElement} */ (row.querySelector(".app")).textContent =
         win.app + (win.fullscreen ? " · fullscreen" : win.floating ? " · floating" : "");
       /** @type {HTMLElement} */ (row.querySelector(".title")).textContent = win.title;
+      // Settings can keep only the app, or only the title.
+      /** @type {HTMLElement} */ (row.querySelector(".app")).hidden = settings.windowRows === "title";
+      /** @type {HTMLElement} */ (row.querySelector(".title")).hidden = settings.windowRows === "app";
       close.setAttribute("aria-label", `close ${win.app || win.title}`);
       close.addEventListener("click", () => {
         send({ type: "window", op: "close", address: win.address });
@@ -947,7 +1178,7 @@ function attachWindowGestures(row, body, win) {
     holdTimer = setTimeout(() => {
       mode = "held";
       body.dataset.held = "true";
-      navigator.vibrate?.(15);
+      vibrate(15);
     }, 450);
   });
 
@@ -1003,7 +1234,9 @@ function attachWindowGestures(row, body, win) {
       else send({ type: "window", op: "focus", address: win.address });
       menuAddress = null;
     } else if (mode === "swipe") {
-      if (-dx > row.clientWidth * 0.6) {
+      // All the way closes at once, unless settings ask first: then it
+      // stops at the close button.
+      if (-dx > row.clientWidth * 0.6 && !settings.confirmClose) {
         body.style.transform = "translateX(-100%)";
         send({ type: "window", op: "close", address: win.address });
         revealedAddress = null;
@@ -1049,7 +1282,7 @@ function startDrag(win, body) {
   renderTiles($("drop-targets"), { actions: false });
   $("drop-strip").hidden = false;
   drag = { win, body, ghost, target: null };
-  navigator.vibrate?.(8);
+  vibrate(8);
 }
 
 /**
@@ -1067,7 +1300,7 @@ function moveDrag(x, y) {
   drag.target = tile;
   if (tile) {
     tile.dataset.target = "true";
-    navigator.vibrate?.(5);
+    vibrate(5);
   }
 }
 
@@ -1115,10 +1348,12 @@ function renderMedia() {
   $("player-play-icon").innerHTML = icon;
 
   // The player shows while a player has something loaded, playing or paused.
-  const showing = Boolean(media?.status);
+  // Settings can keep it to control, or off.
+  const here = settings.player === "all" || (settings.player === "control" && document.body.dataset.tab === "control");
+  const showing = Boolean(media?.status) && here;
   $("player").hidden = !showing;
   document.body.dataset.playing = String(showing);
-  if (!showing && !$("media-sheet").hidden) closeSheet();
+  if (!media?.status && !$("media-sheet").hidden) closeSheet();
   $("player-title").textContent = media?.title || media?.player || "";
   $("player-artist").textContent = media?.artist || media?.status?.toLowerCase() || "";
 
@@ -1249,9 +1484,6 @@ function renderScenes() {
 
 /** The scene being edited; settings left undefined are ones it leaves alone. @type {SceneInput} */
 let draft = { label: "" };
-// Night light's steps, as the deck has them.
-const WARM = 4500;
-const WARMER = 3000;
 
 /** @param {State["scenes"][number] | null} scene */
 function openSceneEditor(scene) {
@@ -1280,7 +1512,7 @@ function sceneChoices() {
     volume: draft.volume === undefined ? "leave" : "set",
     brightness: draft.brightness === undefined ? "leave" : "set",
     dnd: draft.dnd === undefined ? "leave" : draft.dnd ? "on" : "off",
-    nightLight: night === undefined ? "leave" : night === false ? "off" : night > 3750 ? "warm" : "warmer",
+    nightLight: night === undefined ? "leave" : night === false ? "off" : nightStep(night) === 1 ? "warm" : "warmer",
     media: draft.media ?? "leave",
   };
 }
@@ -1314,7 +1546,7 @@ function renderSceneEditor() {
         draft.dnd = leave ? undefined : value === "on";
         break;
       case "nightLight":
-        draft.nightLight = leave ? undefined : value === "off" ? false : value === "warm" ? WARM : WARMER;
+        draft.nightLight = leave ? undefined : value === "off" ? false : value === "warm" ? settings.warm : settings.warmer;
         break;
       case "media":
         draft.media = leave ? undefined : /** @type {"play" | "pause"} */ (value);
@@ -1515,16 +1747,17 @@ function renderNotifications() {
   const notifications = state.notifications;
   $("notifications-body").hidden = !notifications;
   $("notifications-missing").hidden = Boolean(notifications);
-  $("deck-dnd").hidden = !notifications;
+  $("deck-dnd").dataset.supported = String(Boolean(notifications));
   // The badge counts what the sheet lists, not ones from before the remote.
   const listed = notifications?.list.length ?? 0;
   $("notification-count").textContent = listed ? String(listed) : "";
-  $("bell-count").hidden = listed === 0;
+  $("bell-count").hidden = listed === 0 || !settings.bellCount;
   $("bell-count").textContent = listed > 99 ? "99+" : String(listed);
   $("bell").setAttribute("aria-label", listed ? `notifications, ${listed}` : "notifications");
   if (!notifications) return;
 
   $("bell").dataset.dnd = String(notifications.dnd);
+  popUpNew(notifications);
   // A state sent before a tap reached the laptop mustn't flick it back.
   const tapped = dndTapped && Date.now() < dndTapped.until ? dndTapped.on : null;
   $("deck-dnd").dataset.on = String(tapped ?? notifications.dnd);
@@ -1534,6 +1767,28 @@ function renderNotifications() {
   $("notes-hint").hidden = listed === 0;
   $("notes-hint").textContent = "tap to open on the laptop · swipe either way to dismiss";
   renderNotes();
+}
+
+// Notifications already seen; null until the first list, which pops nothing.
+/** @type {Set<number> | null} */
+let seenNotes = null;
+
+/**
+ * A notification that arrives while the remote is open pops up here and
+ * buzzes, unless do not disturb is on or pop-ups are off in settings.
+ * @param {NonNullable<State["notifications"]>} notifications
+ */
+function popUpNew(notifications) {
+  const fresh = seenNotes ? notifications.list.filter((note) => !seenNotes?.has(note.id)) : [];
+  seenNotes = new Set(notifications.list.map((note) => note.id));
+  const note = fresh.at(-1);
+  if (!note || !settings.notePopups || notifications.dnd || document.visibilityState !== "visible") return;
+  vibrate([20, 50, 20]);
+  const text = [note.app, note.title || note.body].filter(Boolean).join(": ").slice(0, 80);
+  alertToast(fresh.length > 1 ? `${text} (+${fresh.length - 1} more)` : text, {
+    label: "open",
+    run: () => send({ type: "notification", op: "open", id: note.id }),
+  });
 }
 
 function renderNotes() {
@@ -1644,11 +1899,45 @@ function attachNoteGestures(row, body, id) {
 
 function renderRadios() {
   const { wifi, bluetooth } = state.radios;
-  $("wifi").hidden = !wifi;
+  const off = settings.headerOff;
+  $("wifi").hidden = !wifi || off.includes("wifi");
   $("wifi").dataset.on = String(Boolean(wifi?.network));
-  $("bluetooth").hidden = !bluetooth;
+  $("bluetooth").hidden = !bluetooth || off.includes("bluetooth");
   $("bluetooth").dataset.on = String(Boolean(bluetooth?.on));
+
+  // The laptop's battery, a number inside a battery as a phone shows its own.
+  const battery = state.stats.battery;
+  const icon = $("battery");
+  icon.hidden = !battery || off.includes("battery");
+  if (!battery) return;
+  icon.dataset.state = battery.charging ? "charging" : battery.level <= 20 ? "low" : "normal";
+  /** @type {HTMLElement} */ (icon.querySelector(".battery-body")).style.setProperty("--level", String(battery.level / 100));
+  $("battery-level").textContent = String(battery.level);
+  icon.setAttribute("aria-label", `laptop battery ${battery.level}%${battery.charging ? ", charging" : ""}`);
+  alertBattery(battery);
 }
+
+// Laptop battery low: once as it drops to the level set in settings, and
+// again only after charging or climbing back above it.
+let batteryArmed = true;
+
+/** @param {{ level: number; charging: boolean }} battery */
+function alertBattery({ level, charging }) {
+  const at = settings.batteryAlert;
+  if (charging || !at || level > at + 2) {
+    batteryArmed = true;
+    return;
+  }
+  if (!batteryArmed || level > at) return;
+  batteryArmed = false;
+  vibrate([30, 60, 30]);
+  alertToast(`laptop battery at ${level}%. plug it in`);
+}
+
+$("battery").addEventListener("click", () => {
+  const battery = state?.stats.battery;
+  if (battery) toast(`laptop battery ${battery.level}%${battery.charging ? ", charging" : ""}`);
+});
 
 function renderBridge() {
   renderClipboard();
@@ -1769,7 +2058,7 @@ function tapOrHold(element, { tap, hold }) {
     start = { x: event.clientX, y: event.clientY };
     timer = setTimeout(() => {
       held = true;
-      navigator.vibrate?.(15);
+      vibrate(15);
       hold();
     }, 500);
   });
@@ -1796,22 +2085,26 @@ $("deck-dnd").addEventListener("click", () => {
   toast(on ? "do not disturb on" : "do not disturb off");
 });
 
-// Night light on the deck: each tap steps off → warm → warmer → off.
-const NIGHT_STEPS = [null, 4500, 3000];
+// Night light on the deck: each tap steps off → warm → warmer → off, at the
+// warmths set in settings.
 const NIGHT_NAMES = ["night light off", "night light warm", "night light warmer"];
 /** @type {{ level: number; until: number } | null} */
 let nightTapped = null;
 
-/** 0 off, 1 warm, 2 warmer: whichever step the warmth is nearest. */
+/** 1 for warm, 2 for warmer: whichever the warmth is nearest. @param {number} temperature */
+function nightStep(temperature) {
+  return Math.abs(temperature - settings.warm) <= Math.abs(temperature - settings.warmer) ? 1 : 2;
+}
+
+/** 0 off, else the step night light is on. */
 function nightLevel() {
   const night = state?.nightLight;
-  if (!night?.on) return 0;
-  return night.temperature > 3750 ? 1 : 2;
+  return night?.on ? nightStep(night.temperature) : 0;
 }
 
 function renderNightLight() {
   const button = $("deck-night");
-  button.hidden = !state.nightLight;
+  button.dataset.supported = String(Boolean(state.nightLight));
   // As with do not disturb: a stale state mustn't undo a tap.
   const level = nightTapped && Date.now() < nightTapped.until ? nightTapped.level : nightLevel();
   button.dataset.level = String(level);
@@ -1819,8 +2112,8 @@ function renderNightLight() {
 }
 
 $("deck-night").addEventListener("click", () => {
-  const level = (Number($("deck-night").dataset.level) + 1) % NIGHT_STEPS.length;
-  const temperature = NIGHT_STEPS[level];
+  const level = (Number($("deck-night").dataset.level) + 1) % NIGHT_NAMES.length;
+  const temperature = [null, settings.warm, settings.warmer][level];
   const sent = temperature ? send({ type: "night-light-set", temperature }) : send({ type: "night-light", on: false });
   if (!sent) return;
   nightTapped = { level, until: Date.now() + 2000 };
@@ -1844,9 +2137,36 @@ tapOrHold($("bluetooth"), {
 
 // Power on the desk's dock: each is a hold, so a stray tap in a pocket can't
 // lock or power off the laptop. The accent floods the dock from the held icon,
-// and the action happens once it's full; letting go early drains it.
-const HOLD_MS = 1000;
-const DECK = { width: 48, height: 400 }; // the dock's viewBox
+// and the action happens once it's full (after the hold time in settings);
+// letting go early drains it.
+const DECK = { width: 48, height: 400 }; // the dock's viewBox; its height fits the icons shown
+
+/**
+ * Shows the icons picked in settings (do not disturb and night light only
+ * where the laptop has them), and sizes the dock to them: the same shoulders,
+ * a longer or shorter body. 1 unit is 1px at 16px per rem, as in the CSS.
+ */
+function layoutDeck() {
+  /** @type {HTMLElement[]} */
+  const buttons = [...document.querySelectorAll("#power-deck [data-deck]")].map((button) => /** @type {HTMLElement} */ (button));
+  for (const button of buttons) {
+    button.hidden = button.dataset.supported === "false" || settings.deckOff.includes(/** @type {string} */ (button.dataset.deck));
+  }
+  const holds = buttons.filter((button) => !button.hidden && button.classList.contains("deck-hold")).length;
+  const taps = buttons.filter((button) => !button.hidden && button.classList.contains("deck-tap")).length;
+  $("deck-divider").hidden = !holds || !taps;
+  $("power-deck").dataset.empty = String(!holds && !taps);
+  // 40 per icon, 14 for the divider, 73 above and below them.
+  const height = 146 + (holds + taps) * 40 + (holds && taps ? 14 : 0);
+  if (height === DECK.height) return;
+  DECK.height = height;
+  $("power-deck").style.height = `${height / 16}rem`;
+  $("deck-shape").setAttribute("viewBox", `0 0 ${DECK.width} ${height}`);
+  const h = height;
+  const d = `M49 0 L48 0 L8.6 53.7 Q1 64 1 76.8 L1 ${h - 76.8} Q1 ${h - 64} 8.6 ${h - 53.7} L48 ${h} L49 ${h} Z`;
+  document.querySelectorAll(".deck-path").forEach((path) => path.setAttribute("d", d));
+}
+layoutDeck();
 const flood = /** @type {SVGCircleElement} */ (/** @type {unknown} */ ($("deck-flood")));
 /** @type {Animation | null} */
 let flooding = null;
@@ -1858,7 +2178,9 @@ function startFlood(button) {
   const deck = /** @type {Element} */ (flood.ownerSVGElement).getBoundingClientRect();
   const icon = button.getBoundingClientRect();
   const unit = DECK.width / deck.width;
-  const cx = (icon.left + icon.width / 2 - deck.left) * unit;
+  const across = (icon.left + icon.width / 2 - deck.left) * unit;
+  // On the left edge the drawing is mirrored, so x runs the other way.
+  const cx = settings.dockSide === "left" ? DECK.width - across : across;
   const cy = (icon.top + icon.height / 2 - deck.top) * unit;
   // Just big enough to reach the farthest corner: full exactly at the end.
   const corners = [
@@ -1874,7 +2196,7 @@ function startFlood(button) {
   flooding?.cancel();
   fading?.cancel();
   flooding = flood.animate([{ transform: "scale(0)" }, { transform: "scale(1)" }], {
-    duration: HOLD_MS,
+    duration: settings.holdMs,
     easing: "cubic-bezier(0.4, 0, 0.8, 1)",
     fill: "forwards",
   });
@@ -1894,7 +2216,7 @@ function startFlood(button) {
     animation.onfinish = () => {
       if (animation.playbackRate < 0) return animation.cancel();
       mine = null;
-      navigator.vibrate?.([20, 40, 20]);
+      vibrate([20, 40, 20]);
       send(JSON.parse(/** @type {string} */ (button.dataset.hold)));
       // Full for a moment, then fades back to black.
       fading = flood.animate([{ opacity: 1 }, { opacity: 0 }], { duration: 400, delay: 350, easing: "ease-out" });
@@ -2224,8 +2546,8 @@ function uploadFile(file, onProgress) {
 }
 
 /**
- * Sends files to ~/Downloads, then opens them on the laptop: one file in its
- * app, several as their folder.
+ * Sends files to the laptop's folder for them, then opens them there (unless
+ * the laptop's settings say not to): one file in its app, several as their folder.
  * @param {File[]} files
  */
 async function uploadAndOpen(files) {
@@ -2247,10 +2569,15 @@ async function uploadAndOpen(files) {
   fill.style.width = "0";
   await opened;
   if (!saved.length) return toast("sending failed");
+  const folder = state?.preferences.receiveTo ?? "downloads";
+  if (state && !state.preferences.openReceived) {
+    toast(saved.length === 1 ? `saved ${saved[0]} to ${folder}` : `saved ${saved.length} files to ${folder}`);
+    return;
+  }
   if (saved.length === 1) send({ type: "open-received", name: /** @type {string} */ (saved[0]) });
   else send({ type: "open-downloads" });
   if (saved.length < files.length) toast(`sent ${saved.length} of ${files.length} files`);
-  else toast(saved.length === 1 ? `opened ${saved[0]} on the laptop` : `sent ${saved.length} files, opened the folder`);
+  else toast(saved.length === 1 ? `opened ${saved[0]} on the laptop` : `sent ${saved.length} files, opened ${folder}`);
 }
 
 $("file-pick").addEventListener("click", () => $("file").click());
@@ -2265,7 +2592,8 @@ let filesKey = "";
 const filePath = (/** @type {FileView} */ file) => `/file?k=${encodeURIComponent(file.key)}`;
 
 function renderFiles() {
-  const { screenshot, downloads } = state.files;
+  const { screenshot } = state.files;
+  const downloads = state.files.downloads.slice(0, settings.downloadsShown);
   // Ages are part of the key, so "2m" becomes "3m".
   const key = JSON.stringify([screenshot?.key, downloads.map((file) => file.key), [screenshot, ...downloads].map((file) => file && timeAgo(file.time))]);
   if (key === filesKey) return;
@@ -2391,7 +2719,8 @@ function updateScreenPolling() {
   if (framePending) return;
   framePending = true;
   let delay = 3000;
-  fetchPaired(`/screen?m=${encodeURIComponent(name)}&q=${viewerOpen ? "sharp" : "preview"}`)
+  const quality = viewerOpen || settings.previewQuality === "sharp" ? "sharp" : "preview";
+  fetchPaired(`/screen?m=${encodeURIComponent(name)}&q=${quality}`)
     .then(
       (blob) =>
         new Promise((resolve) => {
@@ -2400,7 +2729,7 @@ function updateScreenPolling() {
           const image = new Image();
           image.onload = () => {
             showFrame(url);
-            delay = 1000;
+            delay = viewerOpen ? 1000 : settings.previewEvery * 1000;
             resolve(undefined);
           };
           image.onerror = () => {
@@ -2858,15 +3187,14 @@ window.addEventListener("beforeinstallprompt", (event) => {
   renderSheet();
 });
 
+// Installing lives in settings (general, laptop).
 function renderInstallPill() {
   const done = installed();
-  $("install-pill").hidden = done;
-  $("title").hidden = !done;
+  $("install-row").hidden = done;
   if (done && sheet?.kind === "install") closeSheet();
 }
 renderInstallPill();
 window.addEventListener("appinstalled", renderInstallPill);
-$("install-pill").addEventListener("click", () => openSheet({ kind: "install" }));
 
 async function openSecure() {
   const { httpsPort, address } = await (config ?? fetch("/config.json").then((r) => r.json()));
@@ -3021,7 +3349,10 @@ function queueMove(dx, dy) {
 }
 
 // Pointer acceleration: slow drags are precise, fast flicks cross the desk.
-const accelerate = (/** @type {number} */ delta) => delta * (1.4 + Math.min(Math.abs(delta) * 0.12, 2.6));
+// Pointer speed from settings scales the lot; with acceleration off, a
+// finger's move is always the same distance on the laptop.
+const accelerate = (/** @type {number} */ delta) =>
+  delta * (settings.acceleration ? 1.4 + Math.min(Math.abs(delta) * 0.12, 2.6) : 2.2) * (settings.speed / 100);
 
 /**
  * One touch on the pad, from the first finger down to the last one up.
@@ -3114,14 +3445,17 @@ pad.addEventListener("pointermove", (event) => {
     if (gesture.kind !== "scroll" || !first) return;
     gesture.carry.x += dx;
     gesture.carry.y += dy;
-    const down = Math.trunc(gesture.carry.y / SCROLL_STEP);
-    const across = Math.trunc(gesture.carry.x / SCROLL_STEP);
+    // Faster scrolling takes less finger per step.
+    const step = (SCROLL_STEP * 100) / settings.scrollSpeed;
+    const down = Math.trunc(gesture.carry.y / step);
+    const across = Math.trunc(gesture.carry.x / step);
     if (down || across) {
-      gesture.carry.y -= down * SCROLL_STEP;
-      gesture.carry.x -= across * SCROLL_STEP;
-      // The page follows the fingers, as on a phone.
+      gesture.carry.y -= down * step;
+      gesture.carry.x -= across * step;
+      // Natural: the page follows the fingers, as on a phone.
+      const way = settings.naturalScroll ? -1 : 1;
       if (clicksOn()) {
-        send({ type: "pointer-scroll", dy: clamp(-down, -20, 20), dx: clamp(-across, -20, 20) }, { buzz: false });
+        send({ type: "pointer-scroll", dy: clamp(way * down, -20, 20), dx: clamp(way * across, -20, 20) }, { buzz: false });
       }
     }
     return;
@@ -3133,7 +3467,7 @@ pad.addEventListener("pointermove", (event) => {
   // pointer was.
   if (gesture.dragReady && !gesture.dragging && clicksOn()) {
     gesture.dragging = true;
-    navigator.vibrate?.(12);
+    vibrate(12);
     send({ type: "pointer-button", state: "down" }, { buzz: false });
   }
   queueMove(accelerate(dx), accelerate(dy));
@@ -3162,7 +3496,7 @@ function endTouch(event) {
   const tap = Date.now() - ended.startTime < 250 && ended.moved < 12;
   if (!tap) return;
   if (ended.fingers === 1) lastTap = Date.now();
-  if (clicksOn()) send({ type: "pointer-click", button: ended.fingers >= 2 ? "right" : "left" });
+  if (clicksOn() && settings.tapToClick) send({ type: "pointer-click", button: ended.fingers >= 2 ? "right" : "left" });
 }
 pad.addEventListener("pointerup", endTouch);
 pad.addEventListener("pointercancel", endTouch);
@@ -3343,6 +3677,356 @@ window.addEventListener("popstate", () => closePresenter(true));
 document.addEventListener("visibilitychange", () => {
   if (presenterOpen && document.visibilityState === "visible") void keepAwake();
 });
+
+/* -------------------------------------------------------------------------- */
+/* Settings: a page of its own                                                */
+/* -------------------------------------------------------------------------- */
+
+let settingsOpen = false;
+
+function openSettings() {
+  closeSheet();
+  settingsOpen = true;
+  // Opens on the settings for the tab you came from.
+  showSettingsTab(/** @type {string} */ (document.body.dataset.tab));
+  renderSettings();
+  $("settings").hidden = false;
+  $("settings").scrollTop = 0;
+  document.body.dataset.settings = "true";
+  send({ type: "devices" }, { buzz: false });
+  // The phone's back button leaves settings, as the back arrow does.
+  history.pushState({ settings: true }, "");
+}
+
+function closeSettings(fromHistory = false) {
+  if (!settingsOpen) return;
+  settingsOpen = false;
+  $("settings").hidden = true;
+  delete document.body.dataset.settings;
+  if (!fromHistory && history.state?.settings) history.back();
+}
+
+$("gear").addEventListener("click", openSettings);
+$("settings-back").addEventListener("click", () => closeSettings());
+window.addEventListener("popstate", () => closeSettings(true));
+
+/** @param {string} name */
+function showSettingsTab(name) {
+  /** @type {NodeListOf<HTMLElement>} */ (document.querySelectorAll("[data-settings-tab]")).forEach((tab) => {
+    tab.setAttribute("aria-selected", String(tab.dataset.settingsTab === name));
+  });
+  /** @type {NodeListOf<HTMLElement>} */ (document.querySelectorAll("[data-settings-panel]")).forEach((panel) => {
+    panel.hidden = panel.dataset.settingsPanel !== name;
+  });
+}
+
+/** @type {NodeListOf<HTMLElement>} */ (document.querySelectorAll("[data-settings-tab]")).forEach((tab) =>
+  tab.addEventListener("click", () => {
+    showSettingsTab(/** @type {string} */ (tab.dataset.settingsTab));
+    $("settings").scrollTop = 0;
+  }),
+);
+
+/** Marks every switch and choice on the page as the settings have them. */
+function renderSettings() {
+  /** @type {NodeListOf<HTMLElement>} */ (document.querySelectorAll("#accents button")).forEach((button, index) => {
+    button.dataset.active = String(index === accent);
+  });
+  /** @type {NodeListOf<HTMLElement>} */ (document.querySelectorAll("[data-switch]")).forEach((button) => {
+    button.setAttribute("aria-checked", String(Boolean(settings[/** @type {SwitchKey} */ (button.dataset.switch)])));
+  });
+  /** @type {NodeListOf<HTMLElement>} */ (document.querySelectorAll("[data-list]")).forEach((button) => {
+    const list = settings[/** @type {ListKey} */ (button.dataset.list)];
+    button.setAttribute("aria-checked", String(!list.includes(/** @type {string} */ (button.dataset.item))));
+  });
+  /** @type {NodeListOf<HTMLElement>} */ (document.querySelectorAll("[data-set]")).forEach((button) => {
+    button.dataset.active = String(String(settings[/** @type {keyof PhoneSettings} */ (button.dataset.set)]) === button.dataset.value);
+  });
+  // The laptop's own, as it last said.
+  const prefs = state?.preferences;
+  /** @type {NodeListOf<HTMLElement>} */ (document.querySelectorAll("[data-pref-switch]")).forEach((button) => {
+    button.setAttribute("aria-checked", String(Boolean(prefs?.[/** @type {"hotAlert" | "openReceived"} */ (button.dataset.prefSwitch)])));
+    button.toggleAttribute("disabled", !prefs);
+  });
+  /** @type {NodeListOf<HTMLElement>} */ (document.querySelectorAll("[data-pref]")).forEach((button) => {
+    button.dataset.active = String(String(prefs?.[/** @type {"hotAt" | "receiveTo"} */ (button.dataset.pref)]) === button.dataset.value);
+    button.toggleAttribute("disabled", !prefs || (button.dataset.pref === "hotAt" && !prefs.hotAlert));
+  });
+  renderWarmth();
+  setSlider("set-speed", settings.speed);
+  $("speed-value").textContent = `${(settings.speed / 100).toFixed(1)}×`;
+  setSlider("set-scroll", settings.scrollSpeed);
+  $("scroll-value").textContent = `${(settings.scrollSpeed / 100).toFixed(1)}×`;
+  renderLaptop();
+}
+
+/** Saves, puts the settings to work, and shows them. */
+function settingsChanged() {
+  saveSettings();
+  applySettings();
+  renderSettings();
+}
+
+// Accent: one swatch per colour.
+$("accents").replaceChildren(
+  ...ACCENTS.map(([name, color], index) => {
+    const button = document.createElement("button");
+    button.className = "swatch";
+    button.style.setProperty("--swatch", /** @type {string} */ (color));
+    button.setAttribute("aria-label", /** @type {string} */ (name));
+    button.addEventListener("click", () => {
+      accent = index;
+      setAccent(index);
+      try {
+        localStorage.setItem(ACCENT_KEY, /** @type {string} */ (name));
+      } catch {}
+      renderSettings();
+    });
+    return button;
+  }),
+);
+
+/** @type {NodeListOf<HTMLElement>} */ (document.querySelectorAll("[data-switch]")).forEach((button) =>
+  button.addEventListener("click", () => {
+    const key = /** @type {SwitchKey} */ (button.dataset.switch);
+    settings[key] = !settings[key];
+    settingsChanged();
+    if (key === "haptics") vibrate(8);
+    if (key === "awake") {
+      if (settings.awake) void stayAwake();
+      else awakeLock?.release?.().catch(() => {});
+    }
+  }),
+);
+
+/** @type {NodeListOf<HTMLElement>} */ (document.querySelectorAll("[data-list]")).forEach((button) =>
+  button.addEventListener("click", () => {
+    const key = /** @type {ListKey} */ (button.dataset.list);
+    const item = /** @type {string} */ (button.dataset.item);
+    const off = settings[key].includes(item);
+    // At least one tab stays, or there'd be nothing to show.
+    if (!off && key === "tabsOff" && settings.tabsOff.length >= TAB_NAMES.length - 1) {
+      toast("keep at least one tab");
+      return;
+    }
+    settings[key] = off ? settings[key].filter((name) => name !== item) : [...settings[key], item];
+    settingsChanged();
+  }),
+);
+
+/** @type {NodeListOf<HTMLElement>} */ (document.querySelectorAll("[data-set]")).forEach((button) =>
+  button.addEventListener("click", () => {
+    const key = /** @type {keyof PhoneSettings} */ (button.dataset.set);
+    const value = /** @type {string} */ (button.dataset.value);
+    /** @type {any} */ (settings)[key] = typeof DEFAULT_SETTINGS[key] === "number" ? Number(value) : value;
+    settingsChanged();
+  }),
+);
+
+// The laptop's own: sent there, and shown once the laptop's state says so.
+/** @type {NodeListOf<HTMLElement>} */ (document.querySelectorAll("[data-pref-switch]")).forEach((button) =>
+  button.addEventListener("click", () => {
+    const key = /** @type {"hotAlert" | "openReceived"} */ (button.dataset.prefSwitch);
+    if (state) send({ type: "preferences", change: { [key]: !state.preferences[key] } });
+  }),
+);
+/** @type {NodeListOf<HTMLElement>} */ (document.querySelectorAll("[data-pref]")).forEach((button) =>
+  button.addEventListener("click", () => {
+    const value = /** @type {string} */ (button.dataset.value);
+    const change =
+      button.dataset.pref === "hotAt"
+        ? { hotAt: Number(value) }
+        : { receiveTo: /** @type {State["preferences"]["receiveTo"]} */ (value) };
+    send({ type: "preferences", change });
+  }),
+);
+
+function renderWarmth() {
+  setSlider("set-warm", settings.warm);
+  setSlider("set-warmer", settings.warmer);
+  $("warm-value").textContent = `${settings.warm}k`;
+  $("warmer-value").textContent = `${settings.warmer}k`;
+}
+
+/**
+ * Warmer never sits above warm (lower kelvin is warmer), so dragging one past
+ * the other takes it along. While night light is on at the step being
+ * dragged, the laptop follows.
+ * @param {"warm" | "warmer"} which
+ */
+function wireWarmth(which) {
+  const slider = /** @type {HTMLInputElement} */ ($(`set-${which}`));
+  const step = which === "warm" ? 1 : 2;
+  /** @type {boolean | null} */
+  let following = null;
+  let sent = 0;
+  const apply = (/** @type {boolean} */ done) => {
+    settings[which] = Number(slider.value);
+    if (which === "warm") settings.warmer = Math.min(settings.warmer, settings.warm);
+    else settings.warm = Math.max(settings.warm, settings.warmer);
+    saveSettings();
+    renderWarmth();
+    following ??= Number($("deck-night").dataset.level) === step;
+    if (following && (done || Date.now() - sent > 80)) {
+      sent = Date.now();
+      send({ type: "night-light-set", temperature: settings[which] }, { buzz: false });
+      nightTapped = { level: step, until: Date.now() + 2000 };
+    }
+    if (done) following = null;
+  };
+  slider.addEventListener("input", () => apply(false));
+  slider.addEventListener("change", () => apply(true));
+}
+wireWarmth("warm");
+wireWarmth("warmer");
+
+/** @param {string} id @param {"speed" | "scrollSpeed"} key */
+function wireRate(id, key) {
+  $(id).addEventListener("input", () => {
+    settings[key] = Number(/** @type {HTMLInputElement} */ ($(id)).value);
+    saveSettings();
+    renderSettings();
+  });
+}
+wireRate("set-speed", "speed");
+wireRate("set-scroll", "scrollSpeed");
+
+// Keeping the screen on: a wake lock, taken again whenever the remote comes
+// back to the front (the phone drops it on the way out).
+/** @type {any} */
+let awakeLock = null;
+
+async function stayAwake() {
+  if (!settings.awake || document.visibilityState !== "visible" || awakeLock) return;
+  try {
+    awakeLock = await /** @type {any} */ (navigator).wakeLock?.request("screen");
+    awakeLock?.addEventListener?.("release", () => (awakeLock = null));
+  } catch {}
+}
+document.addEventListener("visibilitychange", () => void stayAwake());
+void stayAwake();
+
+/** What /config.json says about the laptop's copy: its version and commit. */
+/** @type {{ version: string; commit: string | null } | null} */
+let about = null;
+
+function renderLaptop() {
+  $("laptop-address").textContent = location.host;
+  $("laptop-status").textContent = socket?.readyState === WebSocket.OPEN ? "live" : "offline";
+  $("install-row").hidden = installed();
+  $("version").textContent = about ? `${about.version}${about.commit ? ` · ${about.commit.slice(0, 7)}` : ""}` : "--";
+  if (about === null && settingsOpen) {
+    fetch("/config.json")
+      .then((response) => response.json())
+      .then((config) => {
+        about = { version: String(config.version ?? "--"), commit: config.commit ?? null };
+        renderLaptop();
+      })
+      .catch(() => {});
+  }
+}
+
+$("settings-install").addEventListener("click", () => openSheet({ kind: "install" }));
+
+/**
+ * A button that needs a second tap within three seconds, for what can't be
+ * undone from the phone.
+ * @param {HTMLElement} button
+ * @param {() => void} run
+ */
+function twoTaps(button, run) {
+  const label = button.textContent;
+  /** @type {ReturnType<typeof setTimeout> | undefined} */
+  let disarm;
+  button.addEventListener("click", () => {
+    if (button.dataset.armed !== "true") {
+      button.dataset.armed = "true";
+      button.textContent = "tap again";
+      disarm = setTimeout(() => {
+        button.dataset.armed = "false";
+        button.textContent = label;
+      }, 3000);
+      return;
+    }
+    clearTimeout(disarm);
+    button.dataset.armed = "false";
+    button.textContent = label;
+    run();
+  });
+}
+
+/** Drops this phone's pairing and starts over: the QR code pairs it again. */
+function forgetLaptop() {
+  storage("clear");
+  location.replace(location.pathname);
+}
+
+twoTaps($("forget"), () => {
+  if (myDevice) send({ type: "device-remove", id: myDevice });
+  forgetLaptop();
+});
+twoTaps($("unpair-all"), () => send({ type: "unpair-all" }));
+twoTaps($("reset-settings"), () => {
+  try {
+    for (const key of [SETTINGS_KEY, ACCENT_KEY, LAYOUT_KEY]) localStorage.removeItem(key);
+  } catch {}
+  location.reload();
+});
+
+// Paired phones, as the laptop lists them. Removing this one forgets the laptop.
+/** @type {string | null} */
+let myDevice = null;
+
+/** @param {import("../src/devices").DeviceView[]} list */
+function renderDevices(list) {
+  $("devices").replaceChildren(
+    ...list.map((device) => {
+      const row = document.createElement("div");
+      row.className = "device";
+      const text = document.createElement("div");
+      const name = document.createElement("p");
+      name.textContent = device.id === myDevice ? `${device.name} · this phone` : device.name;
+      const when = document.createElement("small");
+      when.textContent = `paired ${timeAgo(device.paired)} · ${device.id === myDevice ? "here now" : `seen ${timeAgo(device.seen)}`}`;
+      text.append(name, when);
+      const remove = document.createElement("button");
+      remove.className = "small";
+      remove.textContent = "remove";
+      twoTaps(remove, () => {
+        send({ type: "device-remove", id: device.id });
+        if (device.id === myDevice) forgetLaptop();
+      });
+      row.append(text, remove);
+      return row;
+    }),
+  );
+}
+
+// Whether the laptop's copy is behind GitHub's: compared by commit.
+$("check-updates").addEventListener("click", async () => {
+  const status = $("update-status");
+  status.hidden = false;
+  status.textContent = "checking…";
+  const commit = about?.commit;
+  if (!commit) {
+    status.textContent = "the laptop's copy isn't a git checkout, so there's nothing to compare.";
+    return;
+  }
+  try {
+    const response = await fetch(`https://api.github.com/repos/uzayr-iqbal-hamid/hypr-remote/compare/${commit}...main`);
+    if (!response.ok) throw new Error(String(response.status));
+    const { ahead_by: ahead } = await response.json();
+    status.textContent = ahead
+      ? `${ahead} update${ahead === 1 ? "" : "s"} on github. on the laptop: git pull, then systemctl --user restart hypr-remote.`
+      : "up to date.";
+  } catch {
+    status.textContent = "couldn't reach github. is the phone online?";
+  }
+});
+
+// The tab picked in settings, now that everything is set up.
+applySettings();
+showTab(visibleTabs().includes(settings.tab) ? settings.tab : /** @type {string} */ (visibleTabs()[0]));
 
 if (config) {
   config.then((c) => (c.httpAllowed ? connect() : guideToSecure(c))).catch(connect);

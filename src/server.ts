@@ -3,7 +3,9 @@ import { extname, join, normalize } from "node:path";
 import type { Server, ServerWebSocket } from "bun";
 
 import { Action, runAction, type Reply } from "./actions";
+import { addDevice, clearDevices, deviceFor, listDevices, loadDevices, removeDevice, touchDevice } from "./devices";
 import { hyprSocket, prepareEnvironment } from "./env";
+import { read } from "./run";
 import { CLIP_IMAGE_LIMIT, followClipboard, readClip, setClipboardImage } from "./features/clipboard";
 import { fileFor } from "./features/files";
 import { readArt } from "./features/media";
@@ -11,11 +13,13 @@ import { followNotifications } from "./features/notifications";
 import { captureMonitor, type Quality } from "./features/screen";
 import { saveUpload } from "./features/send";
 import { startStatsSampler } from "./features/stats";
-import { lanAddress, loadToken, publishPairing, tokenMatches } from "./pairing";
+import { lanAddress, loadToken, newToken, publishPairing, tokenMatches } from "./pairing";
+import { loadPreferences, preferences, receiveDir } from "./preferences";
 import { loadScenes, watchScenes } from "./scenes";
 import { readFast, readSlow, viewScenes, type FastState, type SlowState } from "./state";
 import { CA_CERT, ensureCertificate } from "./tls";
 import { watchAudioAndMedia } from "./watch";
+import { version } from "../package.json";
 
 const HTTP_PORT = Number(process.env.PORT ?? 4000);
 const HTTPS_PORT = Number(process.env.HTTPS_PORT ?? 4443);
@@ -33,20 +37,28 @@ if (!prepareEnvironment()) {
   process.exit(1);
 }
 
-const token = await loadToken();
+// The pairing code the QR code carries; replaced when every phone is unpaired.
+let token = await loadToken();
+await loadDevices();
+await loadPreferences();
 let scenes = await loadScenes();
 const address = lanAddress();
+// Which commit this copy runs, for the phone's update check; null outside git.
+const commit = await read(["git", "-C", join(import.meta.dir, ".."), "rev-parse", "HEAD"]);
 
 /* -------------------------------------------------------------------------- */
 /* Live state                                                                 */
 /* -------------------------------------------------------------------------- */
 
-const clients = new Set<ServerWebSocket<undefined>>();
+/** Which paired phone a socket belongs to. */
+type Phone = { device: string };
+
+const clients = new Set<ServerWebSocket<Phone>>();
 let fast: FastState | null = null;
 let slow: SlowState | null = null;
 let lastSent = "";
 
-function send(socket: ServerWebSocket<undefined>, message: unknown) {
+function send(socket: ServerWebSocket<Phone>, message: unknown) {
   socket.send(JSON.stringify(message));
 }
 
@@ -55,7 +67,7 @@ function broadcast(force = false) {
   if (!fast || !slow) return;
   const message = JSON.stringify({
     type: "state",
-    state: { ...fast, ...slow, scenes: viewScenes(scenes, fast, slow) },
+    state: { ...fast, ...slow, scenes: viewScenes(scenes, fast, slow), preferences: preferences() },
   });
   if (!force && message === lastSent) return;
   lastSent = message;
@@ -137,11 +149,14 @@ followNotifications(() => void refresh("slow"));
 followClipboard(() => void refresh("slow"));
 
 // Stats keep ten minutes of history, phone or no phone, and every phone hears
-// when the laptop runs hot.
-startStatsSampler((temperature) => {
-  const message = JSON.stringify({ type: "toast", text: `the laptop is running hot: ${temperature}°c` } satisfies Reply);
-  for (const client of clients) client.send(message);
-});
+// when the laptop runs hot (unless that alert is off in settings).
+startStatsSampler(
+  () => (preferences().hotAlert ? preferences().hotAt : null),
+  (temperature) => {
+    const message = JSON.stringify({ type: "toast", text: `the laptop is running hot: ${temperature}°c` } satisfies Reply);
+    for (const client of clients) client.send(message);
+  },
+);
 
 // Only a fallback now: events cover what changes fast.
 setInterval(() => void refresh("fast"), 5000);
@@ -180,20 +195,21 @@ async function serveStatic(pathname: string): Promise<Response | null> {
 }
 
 /**
- * The token comes in the x-token header, which stays out of history and logs.
- * Only /ws passes `url` to allow ?t=: browsers can't set WebSocket headers.
+ * The phone's own token comes in the x-token header, which stays out of
+ * history and logs. Only /ws passes `url` to allow ?t=: browsers can't set
+ * WebSocket headers. Returns the phone, or null.
  */
 function authorised(request: Request, url?: URL) {
-  return tokenMatches(url?.searchParams.get("t") ?? request.headers.get("x-token"), token);
+  return deviceFor(url?.searchParams.get("t") ?? request.headers.get("x-token"));
 }
 
 // Set once HTTPS is up. From then on the token, and with it typing on this
 // laptop, never crosses plain HTTP, where anyone on the Wi-Fi can read it.
 let httpsRunning = false;
-const PAIRED_PATHS = new Set(["/ws", "/screen", "/upload", "/art", "/clip", "/clipboard", "/file"]);
+const PAIRED_PATHS = new Set(["/ws", "/pair", "/screen", "/upload", "/art", "/clip", "/clipboard", "/file"]);
 const QUALITIES = new Set<string>(["preview", "sharp", "full"]);
 
-async function handle(request: Request, server: Server<undefined>): Promise<Response | undefined> {
+async function handle(request: Request, server: Server<Phone>): Promise<Response | undefined> {
   const url = new URL(request.url);
 
   if (PAIRED_PATHS.has(url.pathname) && httpsRunning && !ALLOW_HTTP && server.url.protocol === "http:") {
@@ -203,10 +219,23 @@ async function handle(request: Request, server: Server<undefined>): Promise<Resp
   }
 
   if (url.pathname === "/ws") {
-    if (!authorised(request, url)) return new Response("Not paired", { status: 401 });
-    return server.upgrade(request)
+    const device = authorised(request, url);
+    if (!device) return new Response("Not paired", { status: 401 });
+    return server.upgrade(request, { data: { device: device.id } })
       ? undefined
       : new Response("Expected a WebSocket", { status: 400 });
+  }
+
+  // A phone trades the QR code's pairing code for a token of its own, naming
+  // itself so it can be told apart in settings. `previous` is the token it had,
+  // when it's pairing again.
+  if (url.pathname === "/pair" && request.method === "POST") {
+    if (!tokenMatches(request.headers.get("x-token"), token)) return new Response("Not paired", { status: 401 });
+    const body = (await request.json().catch(() => null)) as { name?: unknown; previous?: unknown } | null;
+    const name = typeof body?.name === "string" ? body.name : "phone";
+    const previous = typeof body?.previous === "string" ? body.previous : null;
+    const { token: own } = await addDevice(name, previous);
+    return Response.json({ token: own });
   }
 
   // A live look at one monitor.
@@ -272,7 +301,7 @@ async function handle(request: Request, server: Server<undefined>): Promise<Resp
       : new Response("No art", { status: 404 });
   }
 
-  // Files from the phone land in ~/Downloads. One file per request, as the raw
+  // Files from the phone land in the folder picked in settings. One file per request, as the raw
   // body, streamed to disk; the name comes URI-encoded in a header.
   if (url.pathname === "/upload" && request.method === "POST") {
     if (!authorised(request)) return new Response("Not paired", { status: 401 });
@@ -283,7 +312,7 @@ async function handle(request: Request, server: Server<undefined>): Promise<Resp
       return new Response("Bad file name", { status: 400 });
     }
     try {
-      const saved = await saveUpload(name, request.body, UPLOAD_LIMIT);
+      const saved = await saveUpload(name, request.body, UPLOAD_LIMIT, await receiveDir());
       return saved ? Response.json({ saved }) : new Response("Too large", { status: 413 });
     } catch (error) {
       console.warn("Upload failed:", error);
@@ -304,7 +333,7 @@ async function handle(request: Request, server: Server<undefined>): Promise<Resp
   }
 
   if (url.pathname === "/config.json") {
-    return Response.json({ httpsPort: HTTPS_PORT, address, httpAllowed: !httpsRunning || ALLOW_HTTP });
+    return Response.json({ httpsPort: HTTPS_PORT, address, httpAllowed: !httpsRunning || ALLOW_HTTP, version, commit });
   }
 
   if (request.method === "GET") {
@@ -315,18 +344,31 @@ async function handle(request: Request, server: Server<undefined>): Promise<Resp
   return new Response("Not found", { status: 404 });
 }
 
+/** Closed with this code, a phone knows it's been unpaired and stops retrying. */
+const UNPAIRED = 4001;
+
+/** Unpairs every phone: a new QR code, and every socket closed. */
+async function unpairAll() {
+  token = await newToken();
+  await clearDevices();
+  await publishPairing(pairingUrl());
+  for (const client of clients) client.close(UNPAIRED, "unpaired");
+}
+
 const websocket = {
-  open(socket: ServerWebSocket<undefined>) {
+  open(socket: ServerWebSocket<Phone>) {
     clients.add(socket);
+    touchDevice(socket.data.device);
     audioAndMedia.start();
     // A fresh phone needs a full picture now, not on the next tick.
     void refresh("both").then(() => broadcast(true));
   },
-  close(socket: ServerWebSocket<undefined>) {
+  close(socket: ServerWebSocket<Phone>) {
     clients.delete(socket);
+    touchDevice(socket.data.device);
     if (clients.size === 0) audioAndMedia.stop();
   },
-  async message(socket: ServerWebSocket<undefined>, raw: string | Buffer) {
+  async message(socket: ServerWebSocket<Phone>, raw: string | Buffer) {
     let json: unknown;
     try {
       json = JSON.parse(String(raw));
@@ -335,6 +377,20 @@ const websocket = {
     }
     const parsed = Action.safeParse(json);
     if (!parsed.success) return;
+    const action = parsed.data;
+
+    // Paired phones are the server's to manage: it knows which phone asked.
+    if (action.type === "devices" || action.type === "device-remove") {
+      if (action.type === "device-remove" && (await removeDevice(action.id))) {
+        for (const client of clients) if (client.data.device === action.id) client.close(UNPAIRED, "unpaired");
+      }
+      send(socket, { type: "devices", list: listDevices(), you: socket.data.device } satisfies Reply);
+      return;
+    }
+    if (action.type === "unpair-all") {
+      await unpairAll();
+      return;
+    }
 
     try {
       const { changed, reply } = await runAction(parsed.data, scenes);
@@ -366,13 +422,13 @@ try {
 
 Bun.serve({ ...common, port: HTTP_PORT, hostname });
 
-console.log("\nhypr-remote is running.\n");
-if (httpsRunning) {
-  await publishPairing(`https://${address}:${HTTPS_PORT}/?t=${token}`);
-} else {
-  console.warn("Pairing over plain HTTP: anyone on this Wi-Fi can read the token.\n");
-  await publishPairing(`http://${address}:${HTTP_PORT}/?t=${token}`);
+function pairingUrl() {
+  return httpsRunning ? `https://${address}:${HTTPS_PORT}/?t=${token}` : `http://${address}:${HTTP_PORT}/?t=${token}`;
 }
+
+console.log("\nhypr-remote is running.\n");
+if (!httpsRunning) console.warn("Pairing over plain HTTP: anyone on this Wi-Fi can read the token.\n");
+await publishPairing(pairingUrl());
 console.log("Phone and laptop must be on the same Wi-Fi.");
 
 // A new network means a new address: the pairing code and certificate are

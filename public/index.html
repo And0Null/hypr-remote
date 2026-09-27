@@ -30,7 +30,7 @@
         --muted: #8a8a8a;
         --faint: #5a5a5a;
         --red: #d71921;
-        /* The one colour: red unless the phone picked another (tap the title). */
+        /* The one colour: red unless the phone picked another in settings. */
         --accent: var(--red);
         --dot: "Geist", system-ui, sans-serif;
         --mono: "Geist", system-ui, sans-serif;
@@ -39,7 +39,6 @@
         --nav-base: 7rem;
         --player-height: 4rem;
         --player-overlap: 2rem;
-        --nav: var(--nav-base);
         /* How far the power dock reaches in from the right, over the desk. */
         --deck: 3rem;
         /* Frosted glass, for what floats over the page. */
@@ -50,6 +49,20 @@
       * {
         box-sizing: border-box;
         -webkit-tap-highlight-color: transparent;
+      }
+
+      /* Declared on body, so a body that drops the stats has its own base. */
+      body {
+        --nav: var(--nav-base);
+      }
+
+      /* Without the stats, the black band is only the tab bar. */
+      body[data-stats="off"] {
+        --nav-base: 5.2rem;
+      }
+
+      body[data-stats="off"] .stats-strip {
+        display: none;
       }
 
       /* The page stops above the mini player while it shows. */
@@ -99,12 +112,14 @@
       .header-end {
         display: flex;
         align-items: center;
-        gap: 0.4rem;
+        gap: 0.1rem;
         min-width: 0;
       }
 
-      /* Notifications, on every tab; a count while there are some. */
-      .bell {
+      /* Notifications and settings, on every tab; bare icons like the radios.
+         The bell counts notifications while there are some. */
+      .bell,
+      .gear {
         position: relative;
         flex: none;
         display: grid;
@@ -113,10 +128,13 @@
         height: 2.1rem;
         min-height: 0;
         padding: 0;
+        border: 0;
         border-radius: 50%;
+        background: transparent;
       }
 
-      .bell svg {
+      .bell svg,
+      .gear svg {
         width: 1rem;
         height: 1rem;
       }
@@ -144,23 +162,6 @@
         font-weight: 600;
         line-height: 1.05rem;
         text-align: center;
-      }
-
-      .status {
-        display: flex;
-        align-items: center;
-        gap: 0.5rem;
-      }
-
-      .status i {
-        width: 0.5rem;
-        height: 0.5rem;
-        border-radius: 50%;
-        background: var(--red);
-      }
-
-      .status[data-live="true"] i {
-        background: var(--fg);
       }
 
       .tab {
@@ -1266,26 +1267,49 @@
         font-size: 0.8rem;
       }
 
-      /* Wi-Fi and Bluetooth icons, in the header on desk; "live" everywhere else. */
-      .radios {
-        display: none;
-        gap: 0.2rem;
+      /* The title, and the laptop's connection as a dot beside it. */
+      .brand {
+        display: flex;
+        align-items: center;
+        gap: 0.45rem;
+        min-width: 0;
       }
 
-      body[data-tab="desk"] .radios {
+      .live-dot {
+        flex: none;
+        width: 0.45rem;
+        height: 0.45rem;
+        border-radius: 50%;
+        background: var(--faint);
+        transition: background-color 200ms ease;
+      }
+
+      .live-dot[data-live="true"] {
+        background: #30d158;
+        box-shadow: 0 0 0.4rem rgb(48 209 88 / 0.6);
+      }
+
+      .live-dot[data-live="false"] {
+        background: var(--red);
+      }
+
+      /* Bluetooth, Wi-Fi and the laptop's battery, white like a phone's own
+         status bar; dim when off. */
+      .radios {
         display: flex;
+        align-items: center;
       }
 
       .radio {
         display: grid;
         place-items: center;
-        width: 2.1rem;
         height: 2.1rem;
         min-height: 0;
-        padding: 0;
+        padding: 0 0.3rem;
         border: 0;
-        border-radius: 50%;
+        border-radius: 0.6rem;
         background: transparent;
+        color: var(--fg);
         -webkit-touch-callout: none;
       }
 
@@ -1298,45 +1322,63 @@
         height: 1.05rem;
       }
 
+      .radio svg.wifi {
+        width: 1.2rem;
+        height: 0.85rem;
+      }
+
       .radio[data-on="false"] {
         color: var(--faint);
       }
 
-      .radio#bluetooth[data-on="true"] {
-        color: var(--accent);
-      }
-
-      /* On desk, Wi-Fi stands in for "live": red while the laptop is out of reach. */
-      .radio#wifi[data-live="false"] {
-        color: var(--red);
-      }
-
-      body[data-tab="desk"] #status {
-        display: none;
-      }
-
-      .radio-pill {
-        display: inline-flex;
+      /* The level as a number inside the battery, filled up to it. */
+      .battery {
+        display: flex;
         align-items: center;
-        gap: 0.35rem;
-        min-width: 0;
-        max-width: 8.5rem;
-        min-height: 2.1rem;
-        padding: 0 0.75rem;
-        font-size: 0.72rem;
-        -webkit-touch-callout: none;
+        gap: 0.08rem;
       }
 
-      .radio-pill svg {
-        flex: none;
-        width: 0.95rem;
+      .battery-body {
+        --level: 0.5;
+        position: relative;
+        display: grid;
+        place-items: center;
+        width: 1.75rem;
         height: 0.95rem;
-        margin: 0;
+        border-radius: 0.3rem;
+        overflow: hidden;
+        background: rgb(255 255 255 / 0.4);
       }
 
-      .install-pill {
-        max-width: none;
-        border-color: var(--fg);
+      .battery-fill {
+        position: absolute;
+        inset: 0 auto 0 0;
+        width: calc(var(--level) * 100%);
+        background: var(--fg);
+      }
+
+      .battery b {
+        position: relative;
+        font-size: 0.62rem;
+        font-weight: 700;
+        font-variant-numeric: tabular-nums;
+        letter-spacing: -0.02em;
+        color: #000;
+      }
+
+      .battery-nub {
+        width: 0.12rem;
+        height: 0.32rem;
+        border-radius: 0 0.1rem 0.1rem 0;
+        background: rgb(255 255 255 / 0.4);
+      }
+
+      .battery[data-state="charging"] .battery-fill {
+        background: #30d158;
+      }
+
+      .battery[data-state="low"] .battery-fill {
+        background: var(--red);
       }
 
       /* Scenes */
@@ -1480,6 +1522,10 @@
         font-size: 0.72rem;
       }
 
+      .seg button[disabled] {
+        opacity: 0.35;
+      }
+
       .seg button[data-active="true"] {
         background: var(--fg);
         border-color: var(--fg);
@@ -1584,6 +1630,21 @@
         display: flex;
       }
 
+      .power-deck[data-empty="true"] {
+        display: none !important;
+      }
+
+      /* On the left edge: the same dock, mirrored. */
+      body[data-dock="left"] .power-deck {
+        right: auto;
+        left: 0;
+        padding: 0 0.0625rem 0 0;
+      }
+
+      body[data-dock="left"] .deck-shape {
+        transform: scaleX(-1);
+      }
+
       .deck-hold {
         position: relative;
         width: 2.5rem;
@@ -1660,6 +1721,245 @@
         transform-box: fill-box;
         transform-origin: center;
         transform: scale(0);
+      }
+
+      /* Settings: a page over the tabs. No tab bar or dock while it's open. */
+      .settings {
+        position: fixed;
+        inset: 0;
+        z-index: 25;
+        overflow-y: auto;
+        overscroll-behavior: contain;
+        background: var(--bg);
+      }
+
+      body[data-settings="true"] nav,
+      body[data-settings="true"] .power-deck {
+        display: none;
+      }
+
+      body[data-settings="true"] .toast {
+        bottom: calc(env(safe-area-inset-bottom) + 1.5rem);
+      }
+
+      .settings-page {
+        display: grid;
+        gap: 0.9rem;
+        max-width: 30rem;
+        margin: 0 auto;
+        padding: max(1.25rem, env(safe-area-inset-top)) 1rem calc(env(safe-area-inset-bottom) + 2rem);
+      }
+
+      .settings-head {
+        justify-content: flex-start;
+        gap: 0.4rem;
+        margin: 0 0 0.1rem;
+        font-size: 0.95rem;
+        color: var(--fg);
+      }
+
+      .back {
+        display: grid;
+        place-items: center;
+        width: 2.1rem;
+        height: 2.1rem;
+        min-height: 0;
+        margin-left: -0.5rem;
+        padding: 0;
+        border: 0;
+        border-radius: 50%;
+        background: transparent;
+      }
+
+      .back svg {
+        width: 1.2rem;
+        height: 1.2rem;
+      }
+
+      .setting {
+        margin-top: 0.9rem;
+        font-size: 0.85rem;
+      }
+
+      .setting input[type="range"] {
+        margin-top: 0.2rem;
+      }
+
+      .setting-value {
+        font-size: 0.8rem;
+        font-variant-numeric: tabular-nums;
+        color: var(--muted);
+      }
+
+      a.setting-value {
+        color: var(--fg);
+      }
+
+      /* Eight colours, round at any width. */
+      .swatches {
+        display: grid;
+        grid-template-columns: repeat(8, minmax(0, 2.5rem));
+        justify-content: space-between;
+        gap: 0.4rem;
+        margin-top: 0.9rem;
+      }
+
+      .swatch,
+      .swatch:active {
+        width: 100%;
+        height: auto;
+        aspect-ratio: 1;
+        min-height: 0;
+        padding: 0;
+        border: 0;
+        border-radius: 50%;
+        background: var(--swatch);
+      }
+
+      .swatch[data-active="true"] {
+        box-shadow:
+          0 0 0 3px var(--surface),
+          0 0 0 5px var(--fg);
+      }
+
+      /* Settings grouped by the tab they belong to; stays put while scrolling. */
+      .settings-tabs {
+        position: sticky;
+        top: 0.5rem;
+        z-index: 1;
+        display: grid;
+        grid-template-columns: repeat(5, 1fr);
+        gap: 0.25rem;
+        padding: 0.3rem;
+        border-radius: 999px;
+        background: var(--surface);
+        border: 1px solid var(--line);
+        /* Black around it, so cards scrolling under don't show at its edges. */
+        box-shadow: 0 0 0 0.5rem var(--bg);
+      }
+
+      .settings-tabs button {
+        min-height: 2.6rem;
+        padding: 0;
+        border: 0;
+        background: transparent;
+        color: var(--muted);
+        font-size: 0.74rem;
+      }
+
+      .settings-tabs button[aria-selected="true"] {
+        background: var(--accent);
+        color: var(--fg);
+      }
+
+      .settings-tab {
+        display: grid;
+        gap: 0.9rem;
+      }
+
+      .seg-full {
+        display: flex;
+        margin-top: 0.6rem;
+      }
+
+      /* A seg under its own name, and switches' rows, share one rhythm. */
+      .setting > .seg-full,
+      .setting > .swatches {
+        margin-top: 0.6rem;
+      }
+
+      .devices {
+        display: grid;
+        gap: 0.4rem;
+        margin-top: 0.5rem;
+      }
+
+      .device {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 0.75rem;
+        padding: 0.6rem 0.8rem;
+        border-radius: 1rem;
+        background: var(--raised);
+      }
+
+      .device p {
+        margin: 0;
+        font-size: 0.85rem;
+      }
+
+      .device small {
+        display: block;
+        margin-top: 0.15rem;
+        font-size: 0.7rem;
+        color: var(--muted);
+      }
+
+      .device button[data-armed="true"] {
+        background: var(--red);
+        border-color: var(--red);
+      }
+
+      .seg-full button {
+        flex: 1;
+        padding: 0;
+      }
+
+      /* On or off: the knob slides right and the track takes the accent. */
+      .switch {
+        position: relative;
+        flex: none;
+        width: 3rem;
+        height: 1.75rem;
+        min-height: 0;
+        padding: 0;
+      }
+
+      .switch::after {
+        content: "";
+        position: absolute;
+        top: 0.2rem;
+        left: 0.2rem;
+        width: 1.25rem;
+        height: 1.25rem;
+        border-radius: 50%;
+        background: var(--muted);
+        transition:
+          transform 150ms ease,
+          background-color 150ms ease;
+      }
+
+      .switch:active {
+        transform: none;
+      }
+
+      .switch[aria-checked="true"] {
+        background: var(--accent);
+        border-color: var(--accent);
+      }
+
+      .switch[aria-checked="true"]::after {
+        transform: translateX(1.25rem);
+        background: var(--fg);
+      }
+
+      button.small {
+        min-height: 2.1rem;
+        padding: 0 0.9rem;
+        font-size: 0.75rem;
+      }
+
+      .forget {
+        width: 100%;
+        margin-top: 1rem;
+        color: var(--red);
+      }
+
+      .forget[data-armed="true"] {
+        background: var(--red);
+        border-color: var(--red);
+        color: var(--fg);
       }
 
       /* Bottom navigation */
@@ -1825,7 +2125,8 @@
         top: 0.3rem;
         bottom: 0.3rem;
         left: 0.3rem;
-        width: calc((100% - 0.6rem - 0.75rem) / 4);
+        /* One tab's width, however many tabs are kept. */
+        width: calc((100% - 0.6rem - (var(--tabs, 4) - 1) * 0.25rem) / var(--tabs, 4));
         border-radius: 999px;
         background: var(--accent);
         transform: translateX(calc(var(--tab-index, 0) * (100% + 0.25rem)));
@@ -1924,25 +2225,28 @@
   <body>
     <main>
       <header>
-        <span id="title" role="button" aria-label="hypr-remote. tap to change the colour">hypr-remote</span>
-        <button class="radio-pill install-pill" id="install-pill" hidden>
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 4v11M7 10l5 5 5-5M5 20h14" /></svg>
-          <span>install app</span>
-        </button>
+        <!-- The dot: green while the laptop is live, red while it's out of reach. -->
+        <span class="brand"><span id="title">hypr-remote</span><i class="live-dot" id="live-dot" data-live="connecting" role="img" aria-label="connecting"></i></span>
         <span class="header-end">
-        <span class="status" id="status" data-live="false"><i></i><span id="status-text">connecting</span></span>
+        <!-- Like a phone's own status bar: Bluetooth, Wi-Fi, the laptop's battery. -->
         <span class="radios">
-          <button class="radio" id="wifi" data-on="false" data-live="false" aria-label="wi-fi. tap for the network" hidden>
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" aria-hidden="true"><path d="M2.5 9a14 14 0 0 1 19 0M5.8 12.5a9 9 0 0 1 12.4 0M9.2 16a4 4 0 0 1 5.6 0" /><circle cx="12" cy="19.5" r="1" fill="currentColor" /></svg>
-          </button>
           <button class="radio" id="bluetooth" data-on="false" aria-label="bluetooth. tap to turn on or off, hold for what's connected" hidden>
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M7 7l10 10-5 4V3l5 4L7 17" /></svg>
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M7 7l10 10-5 4.5V2.5l5 4.5L7 17" /></svg>
+          </button>
+          <button class="radio" id="wifi" data-on="false" aria-label="wi-fi. tap for the network" hidden>
+            <svg class="wifi" viewBox="0 3.5 24 17" fill="currentColor" stroke="currentColor" stroke-width="1" stroke-linejoin="round" aria-hidden="true"><path d="M12 19 L9.17 16.17 A4 4 0 0 1 14.83 16.17 Z" /><path d="M5.64 12.64 A9 9 0 0 1 18.36 12.64 L16.24 14.76 A6 6 0 0 0 7.76 14.76 Z" /><path d="M2.1 9.1 A14 14 0 0 1 21.9 9.1 L19.78 11.22 A11 11 0 0 0 4.22 11.22 Z" /></svg>
+          </button>
+          <button class="radio battery" id="battery" data-state="normal" aria-label="laptop battery" hidden>
+            <span class="battery-body"><span class="battery-fill"></span><b id="battery-level">--</b></span><i class="battery-nub"></i>
           </button>
         </span>
         <button class="bell" id="bell" data-dnd="false" aria-label="notifications">
           <svg class="bell-on" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 16V11a6 6 0 0 1 12 0v5l1.5 2h-15zM10 20.5a2 2 0 0 0 4 0" /></svg>
           <svg class="bell-off" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M8.5 5.6A6 6 0 0 1 18 11v4M6 11v5l-1.5 2H17M10 20.5a2 2 0 0 0 4 0M3 3l18 18" /></svg>
           <span class="bell-count" id="bell-count" hidden></span>
+        </button>
+        <button class="gear" id="gear" aria-label="settings">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="3" /><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z" /></svg>
         </button>
         </span>
       </header>
@@ -2084,7 +2388,7 @@
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><rect x="2.5" y="6" width="19" height="12" rx="2" /><path d="M6 10h.01M10 10h.01M14 10h.01M18 10h.01M7 14h10" /></svg>
               </button>
             </div>
-            <p>tap to click · double-tap and hold to drag<br />two fingers scroll or pinch · three swipe workspaces</p>
+            <p id="pad-hint">tap to click · double-tap and hold to drag<br />two fingers scroll or pinch · three swipe workspaces</p>
           </div>
           <div class="grid-2" style="margin-top: 0.6rem">
             <button data-action='{"type":"pointer-click","button":"left"}' data-needs="clicks">left click</button>
@@ -2238,6 +2542,184 @@
       </div>
     </div>
 
+    <!-- Settings: a page of its own, over the tabs, with no tab bar or dock.
+         Everything here is remembered on this phone. -->
+    <section class="settings" id="settings" aria-label="settings" hidden>
+      <div class="settings-page">
+        <header class="settings-head">
+          <button class="back" id="settings-back" aria-label="back">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 5l-7 7 7 7" /></svg>
+          </button>
+          <span>settings</span>
+        </header>
+
+        <div class="settings-tabs" role="tablist" aria-label="settings for">
+          <button role="tab" data-settings-tab="general" aria-selected="true">general</button>
+          <button role="tab" data-settings-tab="desk" aria-selected="false">desk</button>
+          <button role="tab" data-settings-tab="control" aria-selected="false">control</button>
+          <button role="tab" data-settings-tab="bridge" aria-selected="false">bridge</button>
+          <button role="tab" data-settings-tab="input" aria-selected="false">input</button>
+        </div>
+
+        <!-- general: what shows on every tab, and the phone and laptop. -->
+        <div class="settings-tab" data-settings-panel="general">
+          <div class="card">
+            <p class="label">look</p>
+            <div class="setting"><span>accent colour</span><div class="swatches" id="accents"></div></div>
+            <div class="setting"><span>text size</span><div class="seg seg-full"><button data-set="textSize" data-value="small">small</button><button data-set="textSize" data-value="normal">normal</button><button data-set="textSize" data-value="large">large</button></div></div>
+          </div>
+
+          <div class="card">
+            <p class="label">tabs</p>
+            <div class="setting"><span>default tab on open</span><div class="seg seg-full"><button data-set="tab" data-value="desk">desk</button><button data-set="tab" data-value="control">control</button><button data-set="tab" data-value="bridge">bridge</button><button data-set="tab" data-value="input">input</button></div></div>
+            <div class="setting row"><span>show desk</span><button class="switch" role="switch" data-list="tabsOff" data-item="desk" aria-label="show desk"></button></div>
+            <div class="setting row"><span>show control</span><button class="switch" role="switch" data-list="tabsOff" data-item="control" aria-label="show control"></button></div>
+            <div class="setting row"><span>show bridge</span><button class="switch" role="switch" data-list="tabsOff" data-item="bridge" aria-label="show bridge"></button></div>
+            <div class="setting row"><span>show input</span><button class="switch" role="switch" data-list="tabsOff" data-item="input" aria-label="show input"></button></div>
+            <div class="setting row"><span>swipe between tabs</span><button class="switch" role="switch" data-switch="swipeTabs" aria-label="swipe between tabs"></button></div>
+          </div>
+
+          <div class="card">
+            <p class="label">top bar</p>
+            <div class="setting row"><span>bluetooth</span><button class="switch" role="switch" data-list="headerOff" data-item="bluetooth" aria-label="bluetooth"></button></div>
+            <div class="setting row"><span>wi-fi</span><button class="switch" role="switch" data-list="headerOff" data-item="wifi" aria-label="wi-fi"></button></div>
+            <div class="setting row"><span>laptop battery</span><button class="switch" role="switch" data-list="headerOff" data-item="battery" aria-label="laptop battery"></button></div>
+            <div class="setting row"><span>notification count</span><button class="switch" role="switch" data-switch="bellCount" aria-label="notification count"></button></div>
+          </div>
+
+          <div class="card">
+            <p class="label">phone</p>
+            <div class="setting row"><span>system resources</span><button class="switch" role="switch" data-switch="stats" aria-label="system resources"></button></div>
+            <p class="hint">cpu, ram, battery, temperature and disk, above the tab bar.</p>
+            <div class="setting row"><span>vibration</span><button class="switch" role="switch" data-switch="haptics" aria-label="vibration"></button></div>
+            <div class="setting row"><span>keep screen on</span><button class="switch" role="switch" data-switch="awake" aria-label="keep screen on"></button></div>
+            <p class="hint">while the remote is open, the phone won't dim or lock.</p>
+          </div>
+
+          <div class="card">
+            <p class="label">alerts</p>
+            <div class="setting row"><span>notification pop-ups</span><button class="switch" role="switch" data-switch="notePopups" aria-label="notification pop-ups"></button></div>
+            <p class="hint">a new notification on the laptop pops up here and buzzes, unless do not disturb is on.</p>
+            <div class="setting"><span>laptop battery low</span><div class="seg seg-full"><button data-set="batteryAlert" data-value="0">off</button><button data-set="batteryAlert" data-value="10">10%</button><button data-set="batteryAlert" data-value="20">20%</button><button data-set="batteryAlert" data-value="30">30%</button></div></div>
+            <div class="setting row"><span>laptop running hot</span><button class="switch" role="switch" data-pref-switch="hotAlert" aria-label="laptop running hot"></button></div>
+            <div class="setting"><span>hot at</span><div class="seg seg-full"><button data-pref="hotAt" data-value="80">80°c</button><button data-pref="hotAt" data-value="85">85°c</button><button data-pref="hotAt" data-value="90">90°c</button><button data-pref="hotAt" data-value="95">95°c</button></div></div>
+            <p class="hint">alerts show while the remote is open. running hot is set on the laptop, for every phone.</p>
+          </div>
+
+          <div class="card">
+            <p class="label">laptop</p>
+            <div class="setting row"><span>address</span><span class="setting-value" id="laptop-address"></span></div>
+            <div class="setting row"><span>connection</span><span class="setting-value" id="laptop-status"></span></div>
+            <div class="setting row" id="install-row"><span>app</span><button class="small" id="settings-install">install</button></div>
+            <p class="setting">paired phones</p>
+            <div class="devices" id="devices"></div>
+            <button class="forget" id="unpair-all">unpair every phone</button>
+            <p class="hint">a new qr code on the laptop; every phone, this one too, scans it to pair again.</p>
+            <button class="forget" id="forget">forget this laptop</button>
+          </div>
+
+          <div class="card">
+            <p class="label">about</p>
+            <div class="setting row"><span>version</span><span class="setting-value" id="version">--</span></div>
+            <div class="setting row"><span>updates</span><button class="small" id="check-updates">check</button></div>
+            <p class="hint" id="update-status" hidden></p>
+            <div class="setting row"><span>source</span><a class="setting-value" href="https://github.com/uzayr-iqbal-hamid/hypr-remote" target="_blank" rel="noopener">github</a></div>
+            <button class="forget" id="reset-settings">reset settings on this phone</button>
+          </div>
+        </div>
+
+        <!-- desk: the dock, workspaces and windows. -->
+        <div class="settings-tab" data-settings-panel="desk" hidden>
+          <div class="card">
+            <p class="label">dock</p>
+            <div class="setting"><span>side</span><div class="seg seg-full"><button data-set="dockSide" data-value="left">left</button><button data-set="dockSide" data-value="right">right</button></div></div>
+            <div class="setting"><span>hold power icons for</span><div class="seg seg-full"><button data-set="holdMs" data-value="500">0.5 s</button><button data-set="holdMs" data-value="1000">1 s</button><button data-set="holdMs" data-value="2000">2 s</button></div></div>
+            <div class="setting row"><span>shut down</span><button class="switch" role="switch" data-list="deckOff" data-item="shut-down" aria-label="shut down"></button></div>
+            <div class="setting row"><span>restart</span><button class="switch" role="switch" data-list="deckOff" data-item="restart" aria-label="restart"></button></div>
+            <div class="setting row"><span>sleep</span><button class="switch" role="switch" data-list="deckOff" data-item="sleep" aria-label="sleep"></button></div>
+            <div class="setting row"><span>lock</span><button class="switch" role="switch" data-list="deckOff" data-item="lock" aria-label="lock"></button></div>
+            <div class="setting row"><span>do not disturb</span><button class="switch" role="switch" data-list="deckOff" data-item="dnd" aria-label="do not disturb"></button></div>
+            <div class="setting row"><span>night light</span><button class="switch" role="switch" data-list="deckOff" data-item="night" aria-label="night light"></button></div>
+            <p class="hint">with no icons on, the dock goes away.</p>
+          </div>
+
+          <div class="card">
+            <p class="label">night light</p>
+            <div class="setting">
+              <div class="row"><span>warm</span><span class="setting-value" id="warm-value"></span></div>
+              <input type="range" id="set-warm" min="2500" max="6000" step="100" aria-label="warm night light, in kelvin" />
+            </div>
+            <div class="setting">
+              <div class="row"><span>warmer</span><span class="setting-value" id="warmer-value"></span></div>
+              <input type="range" id="set-warmer" min="2500" max="6000" step="100" aria-label="warmer night light, in kelvin" />
+            </div>
+            <p class="hint">the dock's night light steps through these. lower is warmer. while one is on, the laptop follows as you drag.</p>
+          </div>
+
+          <div class="card">
+            <p class="label">workspaces and windows</p>
+            <div class="setting row"><span>empty “new” workspace</span><button class="switch" role="switch" data-switch="newTile" aria-label="empty “new” workspace"></button></div>
+            <div class="setting row"><span>ask before closing by swipe</span><button class="switch" role="switch" data-switch="confirmClose" aria-label="ask before closing by swipe"></button></div>
+            <div class="setting"><span>window rows show</span><div class="seg seg-full"><button data-set="windowRows" data-value="both">both</button><button data-set="windowRows" data-value="app">app</button><button data-set="windowRows" data-value="title">title</button></div></div>
+          </div>
+        </div>
+
+        <!-- control: the music player. -->
+        <div class="settings-tab" data-settings-panel="control" hidden>
+          <div class="card">
+            <p class="label">mini player</p>
+            <div class="setting"><span>show it on</span><div class="seg seg-full"><button data-set="player" data-value="all">every tab</button><button data-set="player" data-value="control">control</button><button data-set="player" data-value="off">off</button></div></div>
+            <p class="hint">floats over the tab bar while something plays.</p>
+          </div>
+        </div>
+
+        <!-- bridge: files, downloads and the screen preview. -->
+        <div class="settings-tab" data-settings-panel="bridge" hidden>
+          <div class="card">
+            <p class="label">files you send</p>
+            <div class="setting"><span>save to</span><div class="seg seg-full"><button data-pref="receiveTo" data-value="downloads">downloads</button><button data-pref="receiveTo" data-value="desktop">desktop</button><button data-pref="receiveTo" data-value="documents">docs</button><button data-pref="receiveTo" data-value="pictures">pictures</button></div></div>
+            <div class="setting row"><span>open on the laptop</span><button class="switch" role="switch" data-pref-switch="openReceived" aria-label="open on the laptop"></button></div>
+            <p class="hint">set on the laptop, for every phone.</p>
+          </div>
+
+          <div class="card">
+            <p class="label">take from the laptop</p>
+            <div class="setting"><span>downloads shown</span><div class="seg seg-full"><button data-set="downloadsShown" data-value="3">3</button><button data-set="downloadsShown" data-value="5">5</button><button data-set="downloadsShown" data-value="10">10</button></div></div>
+          </div>
+
+          <div class="card">
+            <p class="label">screen preview</p>
+            <div class="setting"><span>quality</span><div class="seg seg-full"><button data-set="previewQuality" data-value="light">light</button><button data-set="previewQuality" data-value="sharp">sharp</button></div></div>
+            <div class="setting"><span>refresh every</span><div class="seg seg-full"><button data-set="previewEvery" data-value="1">1 s</button><button data-set="previewEvery" data-value="3">3 s</button><button data-set="previewEvery" data-value="10">10 s</button></div></div>
+            <p class="hint">lighter and slower saves data and battery.</p>
+          </div>
+        </div>
+
+        <!-- input: the touchpad and keyboard. -->
+        <div class="settings-tab" data-settings-panel="input" hidden>
+          <div class="card">
+            <p class="label">touchpad</p>
+            <div class="setting">
+              <div class="row"><span>pointer speed</span><span class="setting-value" id="speed-value"></span></div>
+              <input type="range" id="set-speed" min="50" max="200" step="10" aria-label="touchpad pointer speed" />
+            </div>
+            <div class="setting row"><span>pointer acceleration</span><button class="switch" role="switch" data-switch="acceleration" aria-label="pointer acceleration"></button></div>
+            <div class="setting row"><span>tap to click</span><button class="switch" role="switch" data-switch="tapToClick" aria-label="tap to click"></button></div>
+            <div class="setting row"><span>natural scrolling</span><button class="switch" role="switch" data-switch="naturalScroll" aria-label="natural scrolling"></button></div>
+            <div class="setting">
+              <div class="row"><span>scroll speed</span><span class="setting-value" id="scroll-value"></span></div>
+              <input type="range" id="set-scroll" min="50" max="200" step="10" aria-label="touchpad scroll speed" />
+            </div>
+          </div>
+
+          <div class="card">
+            <p class="label">keyboard</p>
+            <div class="setting row"><span>autocorrect</span><button class="switch" role="switch" data-switch="autocorrect" aria-label="autocorrect"></button></div>
+          </div>
+        </div>
+      </div>
+    </section>
+
     <div class="sheet-backdrop" id="sheet-backdrop" hidden></div>
     <div class="sheet" id="sheet" hidden></div>
 
@@ -2300,35 +2782,35 @@
            a straight body, its two corners softened. 1 unit = 1px at 16px per
            rem, like the CSS size. Holding an icon floods it with the accent,
            spreading from that icon. -->
-      <svg class="deck-shape" viewBox="0 0 48 400" aria-hidden="true">
+      <svg class="deck-shape" id="deck-shape" viewBox="0 0 48 400" aria-hidden="true">
         <defs>
-          <clipPath id="deck-clip"><path d="M49 0 L48 0 L8.6 53.7 Q1 64 1 76.8 L1 323.2 Q1 336 8.6 346.3 L48 400 L49 400 Z" /></clipPath>
+          <clipPath id="deck-clip"><path class="deck-path" d="M49 0 L48 0 L8.6 53.7 Q1 64 1 76.8 L1 323.2 Q1 336 8.6 346.3 L48 400 L49 400 Z" /></clipPath>
         </defs>
-        <path class="deck-fill" d="M49 0 L48 0 L8.6 53.7 Q1 64 1 76.8 L1 323.2 Q1 336 8.6 346.3 L48 400 L49 400 Z" />
+        <path class="deck-fill deck-path" d="M49 0 L48 0 L8.6 53.7 Q1 64 1 76.8 L1 323.2 Q1 336 8.6 346.3 L48 400 L49 400 Z" />
         <!-- The clip on a group: on the circle it would scale along with it. -->
         <g clip-path="url(#deck-clip)">
           <circle class="deck-flood" id="deck-flood" cx="24" cy="200" r="0" />
         </g>
       </svg>
-      <button class="deck-hold" data-hold='{"type":"power","op":"shut-down"}' aria-label="hold to shut down">
+      <button class="deck-hold" data-deck="shut-down" data-hold='{"type":"power","op":"shut-down"}' aria-label="hold to shut down">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M12 3v8M6.3 6.8a8 8 0 1 0 11.4 0" /></svg>
       </button>
-      <button class="deck-hold" data-hold='{"type":"power","op":"restart"}' aria-label="hold to restart">
+      <button class="deck-hold" data-deck="restart" data-hold='{"type":"power","op":"restart"}' aria-label="hold to restart">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 12a8 8 0 1 1-2.3-5.7M20 4v4.5h-4.5" /></svg>
       </button>
-      <button class="deck-hold" data-hold='{"type":"power","op":"sleep"}' aria-label="hold to sleep">
+      <button class="deck-hold" data-deck="sleep" data-hold='{"type":"power","op":"sleep"}' aria-label="hold to sleep">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 14.5A8 8 0 0 1 9.5 4a8 8 0 1 0 10.5 10.5z" /></svg>
       </button>
-      <button class="deck-hold" data-hold='{"type":"lock"}' aria-label="hold to lock">
+      <button class="deck-hold" data-deck="lock" data-hold='{"type":"lock"}' aria-label="hold to lock">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="5" y="11" width="14" height="10" rx="2" /><path d="M8 11V7.5a4 4 0 0 1 8 0V11" /></svg>
       </button>
-      <i class="deck-divider" aria-hidden="true"></i>
+      <i class="deck-divider" id="deck-divider" aria-hidden="true"></i>
       <!-- Not a hold: a tap turns do not disturb on or off. -->
-      <button class="deck-tap" id="deck-dnd" data-on="false" aria-label="do not disturb" hidden>
+      <button class="deck-tap" id="deck-dnd" data-deck="dnd" data-supported="false" data-on="false" aria-label="do not disturb" hidden>
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="12" r="8.5" /><path d="M8 12h8" /></svg>
       </button>
       <!-- Night light: off, warm, warmer, off, one tap at a time. -->
-      <button class="deck-tap" id="deck-night" data-on="false" data-level="0" aria-label="night light" hidden>
+      <button class="deck-tap" id="deck-night" data-deck="night" data-supported="false" data-on="false" data-level="0" aria-label="night light" hidden>
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path class="sun" d="M6.5 16a5.5 5.5 0 0 1 11 0z" /><path d="M3 19.5h18M12 4.5v2.5M5.2 8.8l1.6 1.6M18.8 8.8l-1.6 1.6" /></svg>
       </button>
     </div>

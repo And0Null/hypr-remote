@@ -1,8 +1,8 @@
 import { mkdir, open, rm, type FileHandle } from "node:fs/promises";
 import { basename, extname, join } from "node:path";
 
-import { DOWNLOADS_DIR } from "../env";
 import { dispatch } from "../hypr";
+import { receiveDir } from "../preferences";
 import { shellQuote } from "../run";
 
 /**
@@ -53,7 +53,7 @@ export async function saveUpload(
   name: string,
   body: ReadableStream<Uint8Array> | null,
   limit: number,
-  dir = DOWNLOADS_DIR,
+  dir: string,
 ): Promise<string | null> {
   const { path, file } = await safeDestination(name, dir);
   let size = 0;
@@ -91,12 +91,13 @@ const LAUNCHERS = new Set([".desktop", ".sh", ".appimage", ".exe", ".run", ".jar
  * launcher or script opens its folder instead of running.
  */
 export async function openReceived(name: string) {
-  const path = join(DOWNLOADS_DIR, basename(name));
-  const target = LAUNCHERS.has(extname(path).toLowerCase()) ? DOWNLOADS_DIR : path;
+  const dir = await receiveDir();
+  const path = join(dir, basename(name));
+  const target = LAUNCHERS.has(extname(path).toLowerCase()) ? dir : path;
   await dispatch(`exec xdg-open ${shellQuote(target)}`);
 }
 
 /** Several files at once open their folder rather than an app each. */
 export async function openDownloads() {
-  await dispatch(`exec xdg-open ${shellQuote(DOWNLOADS_DIR)}`);
+  await dispatch(`exec xdg-open ${shellQuote(await receiveDir())}`);
 }
