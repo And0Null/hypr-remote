@@ -81,6 +81,7 @@ function connect() {
     everOpened = true;
     retry = 500;
     $("status").dataset.live = "true";
+    $("wifi-pill").dataset.live = "true";
     $("status-text").textContent = "live";
     showBanner("");
   };
@@ -95,6 +96,7 @@ function connect() {
 
   socket.onclose = () => {
     $("status").dataset.live = "false";
+    $("wifi-pill").dataset.live = "false";
     $("status-text").textContent = "offline";
     // Refused before ever opening is almost always a stale token.
     if (!everOpened) showBanner("couldn't connect. if the laptop is on, re-scan its qr code to pair again.");
@@ -144,6 +146,7 @@ function showTab(name) {
   /** @type {NodeListOf<HTMLElement>} */ (document.querySelectorAll(".tab")).forEach((section) => {
     section.dataset.active = String(section.id === `tab-${name}`);
   });
+  document.body.dataset.tab = name;
   try {
     localStorage.setItem("hypr-remote-tab", name);
   } catch {}
@@ -198,6 +201,7 @@ function render(next) {
 function renderDesk() {
   $("workspace").textContent = state.activeWorkspace ? pad2(state.activeWorkspace) : "--";
   $("window").textContent = state.activeWindow ?? "—";
+  renderRadios();
   renderTiles($("workspaces"), { actions: true });
   renderWindows();
   renderMedia();
@@ -260,8 +264,8 @@ function renderTiles(grid, { actions }) {
   // Rebuilt only when the tiles themselves change, so one being held isn't
   // replaced under the finger.
   const key = ids.map((id) => `${id}:${workspaceLabel(id)}:${hint(id)}`).join();
-  if (grid.dataset.key !== key) {
-    grid.dataset.key = key;
+  if (grid.dataset.rendered !== key) {
+    grid.dataset.rendered = key;
     grid.replaceChildren(
       ...ids.map((id) => {
         const button = document.createElement("button");
@@ -769,65 +773,423 @@ function loadArt(key) {
 }
 
 function renderControl() {
-  // Scenes
-  const scenes = $("scenes");
-  if (scenes.children.length !== state.scenes.length) {
-    scenes.replaceChildren(
+  renderScenes();
+  renderVolume();
+  renderBrightness();
+  renderNotifications();
+  renderPower();
+}
+
+/* -------------------------------------------------------------------------- */
+/* Control: scenes                                                            */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * What a scene sets, in a line: "vol 70 · screen 40 · dnd".
+ * @param {State["scenes"][number]} scene
+ */
+function sceneSummary(scene) {
+  const parts = [];
+  if (scene.volume !== undefined) parts.push(`vol ${scene.volume}`);
+  if (scene.brightness !== undefined) parts.push(`screen ${scene.brightness}`);
+  if (scene.nightLight !== undefined) parts.push(scene.nightLight === false ? "true colour" : "warm");
+  if (scene.dnd !== undefined) parts.push(scene.dnd ? "dnd" : "alerts");
+  if (scene.media !== undefined) parts.push(scene.media);
+  return parts.join(" · ");
+}
+
+function renderScenes() {
+  const grid = $("scenes");
+  const key = JSON.stringify(state.scenes.map(({ active: _a, undo: _u, ...scene }) => scene));
+  if (grid.dataset.rendered !== key) {
+    grid.dataset.rendered = key;
+    grid.replaceChildren(
       ...state.scenes.map((scene) => {
         const button = document.createElement("button");
-        button.textContent = scene.label;
-        button.style.minHeight = "4rem";
-        button.style.borderRadius = "1.25rem";
-        button.dataset.action = JSON.stringify({ type: "scene", id: scene.id });
+        const name = document.createElement("span");
+        name.className = "truncate";
+        name.textContent = scene.label;
+        const summary = document.createElement("small");
+        summary.className = "truncate";
+        button.append(name, summary);
+        button.dataset.id = scene.id;
+        tapOrHold(button, {
+          tap: () => send({ type: "scene", id: scene.id }),
+          hold: () => send({ type: "scene-save", id: scene.id }),
+        });
         return button;
       }),
     );
   }
+  state.scenes.forEach((scene, index) => {
+    const button = /** @type {HTMLElement} */ (grid.children[index]);
+    button.dataset.active = String(scene.active);
+    /** @type {HTMLElement} */ (button.querySelector("small")).textContent = scene.undo
+      ? "tap to undo"
+      : sceneSummary(scene);
+  });
+}
 
-  // Volume
+/* -------------------------------------------------------------------------- */
+/* Control: volume, microphone, outputs, apps                                 */
+/* -------------------------------------------------------------------------- */
+
+let showApps = false;
+
+function renderVolume() {
   const volume = state.volume;
   $("volume").textContent = volume ? pad2(volume.level) : "--";
   $("volume-label").textContent = volume?.muted ? "volume · muted" : "volume";
   setSlider("volume-slider", volume?.level);
+  $("volume-slider").dataset.muted = String(Boolean(volume?.muted));
+  $("mute").dataset.on = String(Boolean(volume?.muted));
 
-  const sinks = $("sinks");
-  const sinksKey = JSON.stringify(state.sinks);
-  if (sinks.dataset.key !== sinksKey) {
-    sinks.dataset.key = sinksKey;
-    sinks.replaceChildren(
-      ...state.sinks.map((sink) => {
+  const mic = $("mic");
+  mic.hidden = !state.mic;
+  mic.dataset.muted = String(Boolean(state.mic?.muted));
+  $("mic-text").textContent = state.mic?.muted ? "microphone muted" : "microphone on";
+
+  // One output is no choice at all.
+  $("outputs-block").hidden = state.outputs.length < 2;
+  const outputs = $("outputs");
+  const outputsKey = JSON.stringify(state.outputs);
+  if (outputs.dataset.rendered !== outputsKey) {
+    outputs.dataset.rendered = outputsKey;
+    outputs.replaceChildren(
+      ...state.outputs.map((output) => {
         const button = document.createElement("button");
-        button.textContent = sink.label;
-        button.dataset.active = String(sink.active);
-        button.dataset.action = JSON.stringify({ type: "sink", name: sink.name });
+        button.textContent = output.label;
+        button.dataset.active = String(output.active);
+        button.dataset.action = JSON.stringify({ type: "output", id: output.id });
         return button;
       }),
     );
   }
 
-  // Brightness
-  $("brightness").textContent = state.brightness == null ? "--" : pad2(state.brightness);
-  setSlider("brightness-slider", state.brightness);
+  const apps = state.apps;
+  const toggle = /** @type {HTMLButtonElement} */ ($("apps-toggle"));
+  toggle.hidden = apps.length === 0;
+  toggle.textContent = `${showApps ? "hide" : "show"} ${apps.length} app${apps.length === 1 ? "" : "s"} playing`;
+  $("apps").hidden = !showApps || apps.length === 0;
+  const list = $("apps");
+  // Rebuilt only when apps come or go, so a slider isn't replaced mid-drag.
+  const appsKey = apps.map((app) => app.name).join("\n");
+  if (list.dataset.rendered !== appsKey) {
+    list.dataset.rendered = appsKey;
+    list.replaceChildren(
+      ...apps.flatMap((app, index) => {
+        const row = document.createElement("div");
+        row.className = "row";
+        row.innerHTML = '<span class="label truncate"></span><span class="label"></span>';
+        /** @type {HTMLElement} */ (row.firstElementChild).textContent = app.name;
+        const slider = document.createElement("input");
+        slider.type = "range";
+        slider.min = "0";
+        slider.max = "100";
+        slider.id = `app-${index}`;
+        slider.setAttribute("aria-label", `${app.name} volume`);
+        wireRange(slider, (level) => ({ type: "app-volume", name: app.name, level }));
+        return [row, slider];
+      }),
+    );
+  }
+  apps.forEach((app, index) => {
+    const row = /** @type {HTMLElement} */ (list.children[index * 2]);
+    /** @type {HTMLElement} */ (row.lastElementChild).textContent = app.muted ? "muted" : String(app.level);
+    setSlider(`app-${index}`, app.level);
+  });
+}
 
-  // Notifications
+$("apps-toggle").addEventListener("click", () => {
+  showApps = !showApps;
+  renderVolume();
+});
+
+/* -------------------------------------------------------------------------- */
+/* Control: brightness and night light                                        */
+/* -------------------------------------------------------------------------- */
+
+function renderBrightness() {
+  const { screens, ddc } = state.brightness;
+  // With one screen the big number says it all; with more, each row does.
+  const single = screens.length === 1;
+  $("brightness").hidden = !single;
+  $("brightness").textContent = single && screens[0]?.level != null ? pad2(screens[0].level) : "--";
+
+  const list = $("screens");
+  const key = screens.map((screen) => `${screen.id}:${screen.label}`).join();
+  if (list.dataset.rendered !== key) {
+    list.dataset.rendered = key;
+    list.replaceChildren(
+      ...screens.flatMap((screen, index) => {
+        const slider = document.createElement("input");
+        slider.type = "range";
+        slider.min = "5";
+        slider.max = "100";
+        slider.id = `screen-${index}`;
+        slider.setAttribute("aria-label", `${screen.label} brightness`);
+        // The laptop follows the finger; a monitor over DDC takes up to a
+        // second per change, so it gets one change, when the finger lifts.
+        wireRange(slider, (level) => ({ type: "brightness-set", level, screen: screen.id }), {
+          live: screen.id === "laptop",
+        });
+        if (single) return [slider];
+        const row = document.createElement("div");
+        row.className = "row";
+        row.innerHTML = '<span class="label truncate"></span><span class="label"></span>';
+        /** @type {HTMLElement} */ (row.firstElementChild).textContent = screen.label;
+        return [row, slider];
+      }),
+    );
+  }
+  screens.forEach((screen, index) => {
+    setSlider(`screen-${index}`, screen.level);
+    const row = /** @type {HTMLElement | null} */ (document.getElementById(`screen-${index}`)?.previousElementSibling ?? null);
+    if (row?.classList.contains("row")) {
+      /** @type {HTMLElement} */ (row.lastElementChild).textContent = screen.level == null ? "--" : String(screen.level);
+    }
+  });
+
+  const hint = $("ddc-hint");
+  hint.hidden = !ddc;
+  hint.innerHTML =
+    ddc === "missing"
+      ? "your other screen needs <code>ddcutil</code> for brightness. run <code>scripts/setup-input.sh</code>, or install it."
+      : "<code>ddcutil</code> can't reach your other screen. run <code>scripts/setup-input.sh</code> to allow it.";
+
+  const night = state.nightLight;
+  $("night").hidden = !night;
+  $("night").dataset.on = String(Boolean(night?.on));
+  $("night-note").textContent = night?.on ? `${night.temperature}k` : "off";
+  $("warmth-row").hidden = !night?.on;
+  if (night) {
+    setSlider("warmth", night.temperature);
+    if (!dragging.has("warmth")) $("warmth-value").textContent = `${night.temperature}k`;
+  }
+}
+
+/* -------------------------------------------------------------------------- */
+/* Control: notifications                                                     */
+/* -------------------------------------------------------------------------- */
+
+const NOTE_CAP = 6;
+let notesKey = "";
+let showAllNotes = false;
+let touchingNote = false;
+/** The note swiped open to show dismiss. @type {number | null} */
+let revealedNote = null;
+
+/** @param {number} time */
+function timeAgo(time) {
+  const minutes = Math.floor((Date.now() - time) / 60_000);
+  if (minutes < 1) return "now";
+  if (minutes < 60) return `${minutes}m`;
+  const hours = Math.floor(minutes / 60);
+  return hours < 24 ? `${hours}h` : `${Math.floor(hours / 24)}d`;
+}
+
+/** @param {number} until */
+function timeLeft(until) {
+  const minutes = Math.max(1, Math.round((until - Date.now()) / 60_000));
+  if (minutes <= 90) return `${minutes}m left`;
+  const end = new Date(until);
+  return `until ${end.getHours()}:${pad2(end.getMinutes())}`;
+}
+
+function renderNotifications() {
   const notifications = state.notifications;
-  $("dnd").dataset.on = String(Boolean(notifications?.dnd));
-  $("notification-count").textContent = notifications
-    ? `${notifications.count} notification${notifications.count === 1 ? "" : "s"}`
-    : "swaync isn't running";
+  $("notifications-body").hidden = !notifications;
+  $("notifications-missing").hidden = Boolean(notifications);
+  $("notification-count").textContent = notifications ? String(notifications.count) : "";
+  if (!notifications) return;
 
-  // Radios
-  $("wifi").dataset.on = String(Boolean(state.radios.wifi));
-  $("bluetooth").dataset.on = String(Boolean(state.radios.bluetooth));
-  $("bluetooth-note").textContent = state.radios.bluetooth === null ? "no adapter" : " ";
+  $("dnd").dataset.on = String(notifications.dnd);
+  $("dnd-note").textContent = notifications.dnd
+    ? notifications.dndUntil
+      ? timeLeft(notifications.dndUntil)
+      : "on until you turn it off"
+    : "off";
+  /** @type {HTMLButtonElement} */ ($("notes-clear")).disabled = notifications.count === 0;
+
+  const { list, count } = notifications;
+  const earlier = count - list.length;
+  $("notes-hint").textContent = [
+    list.length ? "tap to open on the laptop · swipe to dismiss" : "",
+    earlier > 0 ? `${earlier} from before the remote started, not shown` : "",
+  ]
+    .filter(Boolean)
+    .join(" · ");
+  renderNotes();
+}
+
+function renderNotes() {
+  if (touchingNote || !state.notifications) return;
+  const list = state.notifications.list;
+  const shown = showAllNotes ? list : list.slice(0, NOTE_CAP);
+  const more = /** @type {HTMLButtonElement} */ ($("notes-more"));
+  more.hidden = list.length <= NOTE_CAP;
+  more.textContent = showAllNotes ? "show less" : `show ${list.length - shown.length} more`;
+
+  // Minutes are part of the key, so "2m" becomes "3m".
+  const key = JSON.stringify([shown.map((note) => [note.id, timeAgo(note.time)]), revealedNote]);
+  if (key === notesKey) return;
+  notesKey = key;
+  $("notes").replaceChildren(
+    ...shown.map((note) => {
+      const row = document.createElement("div");
+      row.className = "window note";
+      row.innerHTML = `
+        <button class="close">dismiss</button>
+        <div class="window-body">
+          <div style="min-width: 0">
+            <p class="app truncate" style="margin: 0"></p>
+            <p class="title truncate" style="margin: 0"></p>
+            <p class="text truncate"></p>
+          </div>
+        </div>`;
+      const body = /** @type {HTMLElement} */ (row.querySelector(".window-body"));
+      // textContent, not innerHTML: notifications are anyone's text.
+      /** @type {HTMLElement} */ (row.querySelector(".app")).textContent = `${note.app || "notification"} · ${timeAgo(note.time)}`;
+      /** @type {HTMLElement} */ (row.querySelector(".title")).textContent = note.title;
+      const text = /** @type {HTMLElement} */ (row.querySelector(".text"));
+      text.textContent = note.body;
+      text.hidden = !note.body;
+      /** @type {HTMLElement} */ (row.querySelector(".close")).addEventListener("click", () => {
+        send({ type: "notification", op: "close", id: note.id });
+        revealedNote = null;
+      });
+      if (revealedNote === note.id) {
+        row.dataset.open = "true";
+        body.style.transform = "translateX(-5.5rem)";
+      }
+      attachNoteGestures(row, body, note.id);
+      return row;
+    }),
+  );
+}
+
+$("notes-more").addEventListener("click", () => {
+  showAllNotes = !showAllNotes;
+  renderNotes();
+});
+
+/**
+ * Tap to open the app on the laptop; swipe left to reveal dismiss, or all the
+ * way to dismiss at once. Windows rows do the same, plus hold and drag.
+ * @param {HTMLElement} row
+ * @param {HTMLElement} body
+ * @param {number} id
+ */
+function attachNoteGestures(row, body, id) {
+  /** @type {{ x: number; y: number } | null} */
+  let start = null;
+  /** @type {"press" | "swipe" | "scroll"} */
+  let mode = "press";
+  let dx = 0;
+  const revealWidth = () => /** @type {HTMLElement} */ (row.querySelector(".close")).offsetWidth;
+  const offset = () => (revealedNote === id ? -revealWidth() : 0);
+
+  body.addEventListener("pointerdown", (event) => {
+    if (event.button !== 0) return;
+    start = { x: event.clientX, y: event.clientY };
+    mode = "press";
+    dx = offset();
+    touchingNote = true;
+    body.setPointerCapture(event.pointerId);
+  });
+
+  body.addEventListener("pointermove", (event) => {
+    if (!start) return;
+    const mx = event.clientX - start.x;
+    const my = event.clientY - start.y;
+    if (mode === "press" && Math.hypot(mx, my) > 10) {
+      mode = Math.abs(mx) > Math.abs(my) ? "swipe" : "scroll";
+      if (mode === "swipe") {
+        body.dataset.dragging = "true";
+        row.dataset.open = "true";
+      }
+    }
+    if (mode === "swipe") {
+      dx = Math.min(0, offset() + mx);
+      body.style.transform = `translateX(${dx}px)`;
+    }
+  });
+
+  /** @param {boolean} cancelled */
+  const end = (cancelled) => {
+    if (!start) return;
+    start = null;
+    touchingNote = false;
+    body.dataset.dragging = "false";
+    if (cancelled) {
+      body.style.transform = offset() ? `translateX(${offset()}px)` : "";
+      row.dataset.open = String(Boolean(offset()));
+    } else if (mode === "press") {
+      if (revealedNote !== null) revealedNote = null;
+      else send({ type: "notification", op: "open", id });
+    } else if (mode === "swipe") {
+      if (-dx > row.clientWidth * 0.6) {
+        body.style.transform = "translateX(-100%)";
+        send({ type: "notification", op: "close", id });
+        revealedNote = null;
+      } else if (-dx > revealWidth() / 2) {
+        body.style.transform = `translateX(-${revealWidth()}px)`;
+        revealedNote = id;
+      } else {
+        body.style.transform = "";
+        if (revealedNote === id) revealedNote = null;
+        body.addEventListener("transitionend", () => (row.dataset.open = "false"), { once: true });
+      }
+    }
+    renderNotes();
+  };
+  body.addEventListener("pointerup", () => end(false));
+  body.addEventListener("pointercancel", () => end(true));
+}
+
+/* -------------------------------------------------------------------------- */
+/* Control: power                                                             */
+/* -------------------------------------------------------------------------- */
+
+function renderPower() {
+  // Any screen off counts: "screen on" brings them all back.
+  const off = state.monitors.some((monitor) => !monitor.on);
+  $("screen-off").hidden = off;
+  $("screen-on").hidden = !off;
+}
+
+/* -------------------------------------------------------------------------- */
+/* Desk header: Wi-Fi and Bluetooth                                           */
+/* -------------------------------------------------------------------------- */
+
+function renderRadios() {
+  const { wifi, bluetooth } = state.radios;
+  const wifiPill = $("wifi-pill");
+  wifiPill.hidden = !wifi;
+  wifiPill.dataset.on = String(Boolean(wifi?.on));
+  $("wifi-name").textContent = !wifi?.on ? "off" : (wifi.network ?? "no network");
+  wifiPill.title = wifi?.network ?? "";
+
+  const bluetoothPill = $("bluetooth-pill");
+  bluetoothPill.hidden = !bluetooth;
+  bluetoothPill.dataset.on = String(Boolean(bluetooth?.on));
+  const connected = bluetooth?.connected ?? [];
+  $("bluetooth-name").textContent = !bluetooth?.on
+    ? "off"
+    : connected.length === 0
+      ? "on"
+      : connected.length === 1
+        ? String(connected[0])
+        : `${connected[0]} +${connected.length - 1}`;
+  bluetoothPill.title = connected.join(", ");
 }
 
 function renderBridge() {
   // Monitors for the screen preview.
   const monitors = $("monitors");
   const key = state.monitors.map((m) => m.name).join();
-  if (monitors.dataset.key !== key) {
-    monitors.dataset.key = key;
+  if (monitors.dataset.rendered !== key) {
+    monitors.dataset.rendered = key;
     monitors.replaceChildren(
       ...state.monitors.map((monitor) => {
         const button = document.createElement("button");
@@ -932,70 +1294,164 @@ document.addEventListener("pointerdown", (event) => {
 ["pointerup", "pointercancel"].forEach((type) => document.addEventListener(type, stopRepeat));
 
 /**
- * Sliders send while dragging, at most every 80ms.
- * @param {string} id
+ * A range input that sends while dragging, at most every 80ms, or (with
+ * `live: false`) only once the finger lifts.
+ * @param {HTMLInputElement} slider
  * @param {(level: number) => Action} toAction
+ * @param {{ live?: boolean }} [options]
  */
-function wireSlider(id, toAction) {
-  const slider = /** @type {HTMLInputElement} */ ($(id));
+function wireRange(slider, toAction, { live = true } = {}) {
   let last = 0;
-  slider.addEventListener("pointerdown", () => dragging.add(id));
+  slider.addEventListener("pointerdown", () => dragging.add(slider.id));
+  slider.addEventListener("pointercancel", () => dragging.delete(slider.id));
   slider.addEventListener("input", () => {
     const [min, max] = [Number(slider.min), Number(slider.max)];
     slider.style.setProperty("--fill", `${((Number(slider.value) - min) / (max - min)) * 100}%`);
-    if (Date.now() - last < 80) return;
+    if (!live || Date.now() - last < 80) return;
     last = Date.now();
     send(toAction(Number(slider.value)), { buzz: false });
   });
   slider.addEventListener("change", () => {
     send(toAction(Number(slider.value)), { buzz: false });
-    dragging.delete(id);
+    dragging.delete(slider.id);
   });
 }
+
+/**
+ * @param {string} id
+ * @param {(level: number) => Action} toAction
+ */
+const wireSlider = (id, toAction) => wireRange(/** @type {HTMLInputElement} */ ($(id)), toAction);
 wireSlider("volume-slider", (level) => ({ type: "volume-set", level }));
 wireSlider("media-volume", (level) => ({ type: "volume-set", level }));
-wireSlider("brightness-slider", (level) => ({ type: "brightness-set", level }));
+wireSlider("warmth", (temperature) => ({ type: "night-light-set", temperature }));
+$("warmth").addEventListener("input", () => {
+  $("warmth-value").textContent = `${/** @type {HTMLInputElement} */ ($("warmth")).value}k`;
+});
 
-$("dnd").addEventListener("click", () => send({ type: "notifications", op: "toggle-dnd" }));
-$("bluetooth").addEventListener("click", () =>
-  send({ type: "radio", device: "bluetooth", on: $("bluetooth").dataset.on !== "true" }),
+/**
+ * A tap does one thing, a half-second hold another (and not the tap too).
+ * @param {HTMLElement} element
+ * @param {{ tap: () => void; hold: () => void }} handlers
+ */
+function tapOrHold(element, { tap, hold }) {
+  /** @type {ReturnType<typeof setTimeout> | undefined} */
+  let timer;
+  /** @type {{ x: number; y: number } | null} */
+  let start = null;
+  let held = false;
+  element.addEventListener("pointerdown", (event) => {
+    held = false;
+    start = { x: event.clientX, y: event.clientY };
+    timer = setTimeout(() => {
+      held = true;
+      navigator.vibrate?.(15);
+      hold();
+    }, 500);
+  });
+  element.addEventListener("pointermove", (event) => {
+    if (start && Math.hypot(event.clientX - start.x, event.clientY - start.y) > 10) clearTimeout(timer);
+  });
+  ["pointerup", "pointercancel", "pointerleave"].forEach((type) =>
+    element.addEventListener(type, () => clearTimeout(timer)),
+  );
+  element.addEventListener("click", () => {
+    if (held) held = false;
+    else tap();
+  });
+  element.addEventListener("contextmenu", (event) => event.preventDefault());
+}
+
+$("night").addEventListener("click", () =>
+  send({ type: "night-light", on: $("night").dataset.on !== "true" }),
+);
+
+$("dnd").addEventListener("click", () =>
+  send({ type: "dnd", mode: $("dnd").dataset.on === "true" ? "off" : "on" }),
+);
+/** @type {NodeListOf<HTMLElement>} */ (document.querySelectorAll("#dnd-timers button")).forEach((button) =>
+  button.addEventListener("click", () =>
+    send({ type: "dnd", mode: /** @type {"hour" | "morning"} */ (button.dataset.mode) }),
+  ),
 );
 
 // Wi-Fi off cuts this very connection, and nothing on the phone can bring it
 // back. Turning it off takes a second tap within three seconds.
 /** @type {ReturnType<typeof setTimeout> | null} */
 let wifiArmed = null;
-$("wifi").addEventListener("click", () => {
-  const on = $("wifi").dataset.on === "true";
-  if (!on) {
-    send({ type: "radio", device: "wifi", on: true });
-    return;
-  }
-  if (wifiArmed) {
-    clearTimeout(wifiArmed);
-    wifiArmed = null;
-    send({ type: "radio", device: "wifi", on: false });
-    return;
-  }
-  toast("tap again to turn wi-fi off — you'll lose this remote");
-  wifiArmed = setTimeout(() => (wifiArmed = null), 3000);
+tapOrHold($("wifi-pill"), {
+  tap() {
+    if (!state?.radios.wifi?.on) {
+      send({ type: "radio", device: "wifi", on: true });
+      return;
+    }
+    if (wifiArmed) {
+      clearTimeout(wifiArmed);
+      wifiArmed = null;
+      send({ type: "radio", device: "wifi", on: false });
+      return;
+    }
+    toast(
+      state.radios.wired
+        ? "tap again to turn wi-fi off"
+        : "tap again to turn wi-fi off — you'll lose this remote",
+    );
+    wifiArmed = setTimeout(() => (wifiArmed = null), 3000);
+  },
+  hold: () => send({ type: "radio-menu", device: "wifi" }),
+});
+tapOrHold($("bluetooth-pill"), {
+  tap: () => send({ type: "radio", device: "bluetooth", on: !state?.radios.bluetooth?.on }),
+  hold: () => send({ type: "radio-menu", device: "bluetooth" }),
 });
 
-// Hold-to-confirm (lock): a stray tap in a pocket shouldn't lock the laptop.
+// Hold-to-confirm: a stray tap in a pocket shouldn't lock or power off the
+// laptop. Restart and shut down also want a tap after the hold: the remote
+// can't undo them.
 /** @type {NodeListOf<HTMLElement>} */ (document.querySelectorAll("[data-hold]")).forEach((button) => {
+  const label = /** @type {HTMLElement} */ (button.lastElementChild);
+  const text = label.textContent;
   /** @type {ReturnType<typeof setTimeout> | undefined} */
   let timer = undefined;
+  /** @type {ReturnType<typeof setTimeout> | undefined} */
+  let disarm = undefined;
+  // The release that ends a hold is a click too; it mustn't confirm.
+  let justHeld = false;
+  const action = () => JSON.parse(/** @type {string} */ (button.dataset.hold));
   const cancel = () => {
     clearTimeout(timer);
     button.dataset.holding = "false";
   };
+  const reset = () => {
+    clearTimeout(disarm);
+    button.dataset.armed = "false";
+    label.textContent = text;
+  };
   button.addEventListener("pointerdown", () => {
+    justHeld = false;
+    if (button.dataset.armed === "true") return;
     button.dataset.holding = "true";
     timer = setTimeout(() => {
-      send(JSON.parse(/** @type {string} */ (button.dataset.hold)));
-      navigator.vibrate?.([20, 40, 20]);
       cancel();
+      justHeld = true;
+      navigator.vibrate?.([20, 40, 20]);
+      if (!button.dataset.confirm) {
+        send(action());
+        return;
+      }
+      button.dataset.armed = "true";
+      label.textContent = button.dataset.confirm;
+      disarm = setTimeout(reset, 3000);
     }, 800);
+  });
+  button.addEventListener("click", () => {
+    if (justHeld) {
+      justHeld = false;
+      return;
+    }
+    if (button.dataset.armed !== "true") return;
+    reset();
+    send(action());
   });
   ["pointerup", "pointercancel", "pointerleave"].forEach((type) => button.addEventListener(type, cancel));
   button.addEventListener("contextmenu", (event) => event.preventDefault());

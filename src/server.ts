@@ -5,11 +5,12 @@ import type { Server, ServerWebSocket } from "bun";
 import { Action, runAction, type Reply } from "./actions";
 import { hyprSocket, prepareEnvironment } from "./env";
 import { readArt } from "./features/media";
+import { followNotifications } from "./features/notifications";
 import { captureMonitor } from "./features/screen";
 import { saveUpload } from "./features/send";
 import { lanAddress, loadToken, publishPairing, tokenMatches } from "./pairing";
-import { loadScenes } from "./scenes";
-import { readFast, readSlow, type FastState, type SlowState } from "./state";
+import { loadScenes, watchScenes } from "./scenes";
+import { readFast, readSlow, viewScenes, type FastState, type SlowState } from "./state";
 import { CA_CERT, ensureCertificate } from "./tls";
 import { watchAudioAndMedia } from "./watch";
 
@@ -30,7 +31,7 @@ if (!prepareEnvironment()) {
 }
 
 const token = await loadToken();
-const scenes = await loadScenes();
+let scenes = await loadScenes();
 const address = lanAddress();
 
 /* -------------------------------------------------------------------------- */
@@ -51,7 +52,7 @@ function broadcast(force = false) {
   if (!fast || !slow) return;
   const message = JSON.stringify({
     type: "state",
-    state: { ...fast, ...slow, scenes: scenes.map(({ id, label }) => ({ id, label })) },
+    state: { ...fast, ...slow, scenes: viewScenes(scenes, fast, slow) },
   });
   if (!force && message === lastSent) return;
   lastSent = message;
@@ -118,6 +119,16 @@ async function followHyprland() {
 
 // Volume, sound output and media arrive live too, while a phone is connected.
 const audioAndMedia = watchAudioAndMedia((stale) => void refresh(stale));
+
+// Scenes saved from the phone, or edited by hand, reach phones without a restart.
+watchScenes((next) => {
+  scenes = next;
+  broadcast();
+});
+
+// Notifications are read as they arrive, phone or no phone, so the list is
+// there when one connects.
+followNotifications(() => void refresh("slow"));
 
 // Only a fallback now: events cover what changes fast.
 setInterval(() => void refresh("fast"), 5000);

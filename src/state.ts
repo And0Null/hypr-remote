@@ -1,53 +1,89 @@
-import { readSinks, readVolume, type Sink, type Volume } from "./features/audio";
+import {
+  readApps,
+  readMicMuted,
+  readOutputs,
+  readVolume,
+  type AppVolume,
+  type Output,
+  type Volume,
+} from "./features/audio";
 import { readDesktop, type DesktopSnapshot } from "./features/desktop";
+import { readBrightness, readNightLight, type Brightness, type NightLight } from "./features/display";
 import { readInputSupport } from "./features/input";
 import { readMedia, type Media } from "./features/media";
+import { readNotifications, type Notifications } from "./features/notifications";
+import { readRadios, type Radios } from "./features/radios";
 import { readStats, type Stats } from "./features/stats";
-import {
-  readBrightness,
-  readNotifications,
-  readRadios,
-  type Notifications,
-  type Radios,
-} from "./features/system";
-import type { Scene } from "./scenes";
+import { sceneMatches, undoableScene, type Scene, type Settings } from "./scenes";
 
 /**
  * Everything the phone shows, split by how often it's worth re-reading.
  *
- * Fast: the desktop, volume and media — things you change and expect to see
- * move. Slow: outputs, radios, notifications, stats, and which optional tools
- * are installed — things that change rarely or only need to be roughly live.
+ * Fast: the desktop, volume, microphone, apps and media — things you change
+ * and expect to see move. Slow: outputs, brightness, night light, radios,
+ * notifications, stats, and which optional tools are installed — things that
+ * change rarely, are slow to read (DDC), or only need to be roughly live.
  */
 export type FastState = DesktopSnapshot & {
   volume: Volume | null;
+  mic: { muted: boolean } | null;
+  apps: AppVolume[];
   media: Media | null;
 };
 
 export type SlowState = {
-  sinks: Sink[];
-  brightness: number | null;
+  outputs: Output[];
+  brightness: Brightness;
+  nightLight: NightLight;
   notifications: Notifications;
   radios: Radios;
   stats: Stats;
   input: { keyboard: boolean; clicks: boolean };
 };
 
-export type State = FastState & SlowState & { scenes: Pick<Scene, "id" | "label">[] };
+/**
+ * Scenes as the phone shows them: `active` while the desktop matches one,
+ * `undo` while tapping it again would put things back.
+ */
+export type SceneView = Scene & { active: boolean; undo: boolean };
+
+export type State = FastState & SlowState & { scenes: SceneView[] };
 
 export async function readFast(): Promise<FastState> {
-  const [desktop, volume, media] = await Promise.all([readDesktop(), readVolume(), readMedia()]);
-  return { ...desktop, volume, media };
+  const [desktop, volume, micMuted, apps, media] = await Promise.all([
+    readDesktop(),
+    readVolume(),
+    readMicMuted(),
+    readApps(),
+    readMedia(),
+  ]);
+  return { ...desktop, volume, mic: micMuted === null ? null : { muted: micMuted }, apps, media };
 }
 
 export async function readSlow(): Promise<SlowState> {
-  const [sinks, brightness, notifications, radios, stats, input] = await Promise.all([
-    readSinks(),
+  const [outputs, brightness, nightLight, notifications, radios, stats, input] = await Promise.all([
+    readOutputs(),
     readBrightness(),
+    readNightLight(),
     readNotifications(),
     readRadios(),
     readStats(),
     readInputSupport(),
   ]);
-  return { sinks, brightness, notifications, radios, stats, input };
+  return { outputs, brightness, nightLight, notifications, radios, stats, input };
+}
+
+export function viewScenes(scenes: Scene[], fast: FastState, slow: SlowState): SceneView[] {
+  const night = slow.nightLight;
+  const now: Settings = {
+    volume: fast.volume?.level ?? null,
+    brightness: slow.brightness.screens,
+    dnd: slow.notifications?.dnd ?? null,
+    nightLight: night === null ? null : night.on ? night.temperature : false,
+  };
+  const undo = undoableScene();
+  return scenes.map((scene) => {
+    const active = sceneMatches(scene, now);
+    return { ...scene, active, undo: active && undo === scene.id };
+  });
 }

@@ -788,6 +788,178 @@
         font-size: 1rem;
       }
 
+      /* Wi-Fi and Bluetooth, in the header on desk; "live" everywhere else. */
+      .radio-pills {
+        display: none;
+        gap: 0.4rem;
+        min-width: 0;
+      }
+
+      body[data-tab="desk"] .radio-pills {
+        display: flex;
+      }
+
+      body[data-tab="desk"] #status {
+        display: none;
+      }
+
+      .radio-pill {
+        display: inline-flex;
+        align-items: center;
+        gap: 0.35rem;
+        min-width: 0;
+        max-width: 8.5rem;
+        min-height: 2.1rem;
+        padding: 0 0.75rem;
+        font-size: 0.72rem;
+        -webkit-touch-callout: none;
+      }
+
+      .radio-pill svg {
+        flex: none;
+        width: 0.95rem;
+        height: 0.95rem;
+        margin: 0;
+      }
+
+      .radio-pill[data-on="false"] {
+        color: var(--faint);
+      }
+
+      /* The connection to the laptop: white while live, red when it drops. */
+      .radio-pill i {
+        flex: none;
+        width: 0.4rem;
+        height: 0.4rem;
+        border-radius: 50%;
+        background: var(--red);
+      }
+
+      .radio-pill[data-live="true"] i {
+        background: var(--fg);
+      }
+
+      /* Scenes */
+      .scenes button {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        gap: 0.3rem;
+        min-width: 0;
+        min-height: 4.4rem;
+        padding: 0.4rem 0.6rem;
+        border-radius: 1.25rem;
+        -webkit-touch-callout: none;
+      }
+
+      .scenes small {
+        max-width: 100%;
+        font-size: 0.62rem;
+        color: var(--muted);
+      }
+
+      .scenes button[data-active="true"] {
+        background: var(--fg);
+        border-color: var(--fg);
+        color: var(--bg);
+      }
+
+      .scenes button[data-active="true"] small {
+        color: var(--bg);
+      }
+
+      /* Volume */
+      .toggle[data-on="true"] {
+        background: var(--fg);
+        border-color: var(--fg);
+        color: var(--bg);
+      }
+
+      #volume-slider[data-muted="true"] {
+        opacity: 0.4;
+      }
+
+      .mic {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        gap: 0.5rem;
+        width: 100%;
+        margin-top: 0.6rem;
+      }
+
+      .mic svg {
+        margin: 0;
+        width: 1.1rem;
+        height: 1.1rem;
+      }
+
+      .mic[data-muted="true"] {
+        background: var(--red);
+        border-color: var(--red);
+      }
+
+      .apps {
+        display: grid;
+        gap: 0.2rem;
+      }
+
+      .apps .row {
+        margin-top: 0.6rem;
+      }
+
+      .apps input[type="range"],
+      #screens input[type="range"] {
+        margin-top: 0.3rem;
+      }
+
+      #screens .row {
+        margin-top: 0.9rem;
+      }
+
+      /* Notifications, in the same rows as windows. */
+      .note .window-body {
+        grid-template-columns: 1fr;
+      }
+
+      .note .text {
+        margin: 0.2rem 0 0;
+        font-size: 0.74rem;
+        color: var(--muted);
+      }
+
+      #dnd-timers {
+        margin-top: 0.6rem;
+      }
+
+      #notes:not(:empty) {
+        margin-top: 1rem;
+      }
+
+      /* Power */
+      .power {
+        display: grid;
+        grid-template-columns: repeat(3, 1fr);
+        gap: 0.6rem;
+        margin-top: 1rem;
+      }
+
+      .power-2 {
+        margin-top: 0.6rem;
+      }
+
+      .power button,
+      .power-2 button {
+        padding: 0 0.4rem;
+        font-size: 0.85rem;
+      }
+
+      .hold[data-armed="true"] {
+        background: var(--red);
+        border-color: var(--red);
+      }
+
       /* Bottom navigation */
       nav {
         position: fixed;
@@ -885,6 +1057,17 @@
       <header>
         <span>hypr-remote</span>
         <span class="status" id="status" data-live="false"><i></i><span id="status-text">connecting</span></span>
+        <span class="radio-pills">
+          <button class="radio-pill" id="wifi-pill" data-on="false" data-live="false" aria-label="wi-fi">
+            <i></i>
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" aria-hidden="true"><path d="M2.5 9a14 14 0 0 1 19 0M5.8 12.5a9 9 0 0 1 12.4 0M9.2 16a4 4 0 0 1 5.6 0" /><circle cx="12" cy="19.5" r="1" fill="currentColor" /></svg>
+            <span class="truncate" id="wifi-name">wi-fi</span>
+          </button>
+          <button class="radio-pill" id="bluetooth-pill" data-on="false" aria-label="bluetooth">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M7 7l10 10-5 4V3l5 4L7 17" /></svg>
+            <span class="truncate" id="bluetooth-name">bluetooth</span>
+          </button>
+        </span>
       </header>
 
       <p class="banner" id="banner"></p>
@@ -956,7 +1139,8 @@
       <section class="tab" id="tab-control">
         <div class="card">
           <p class="label">scenes</p>
-          <div class="grid-2" id="scenes" style="margin-top: 1rem"></div>
+          <div class="grid-2 scenes" id="scenes" style="margin-top: 1rem"></div>
+          <p class="hint">tap to apply, again to undo · hold to save what's on now into it</p>
         </div>
 
         <div class="card">
@@ -969,13 +1153,21 @@
             <button aria-label="volume down" data-repeat data-action='{"type":"volume","command":"down"}'>
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M5 12h14" /></svg>
             </button>
-            <button data-action='{"type":"volume","command":"mute"}'>mute</button>
+            <button class="toggle" id="mute" data-on="false" data-action='{"type":"volume","command":"mute"}'>mute</button>
             <button aria-label="volume up" data-repeat data-action='{"type":"volume","command":"up"}'>
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M5 12h14M12 5v14" /></svg>
             </button>
           </div>
-          <p class="label" style="margin-top: 1.25rem">sound output</p>
-          <div class="pills" id="sinks"></div>
+          <button class="mic" id="mic" data-muted="false" data-action='{"type":"mic"}' hidden>
+            <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 3a3 3 0 0 0-3 3v6a3 3 0 0 0 6 0V6a3 3 0 0 0-3-3zM6 11h2a4 4 0 0 0 8 0h2a6 6 0 0 1-5 5.9V20h-2v-3.1A6 6 0 0 1 6 11z" /></svg>
+            <span id="mic-text">microphone on</span>
+          </button>
+          <div id="outputs-block" hidden>
+            <p class="label" style="margin-top: 1.25rem">sound output</p>
+            <div class="pills" id="outputs"></div>
+          </div>
+          <button class="more" id="apps-toggle" hidden></button>
+          <div class="apps" id="apps" hidden></div>
         </div>
 
         <div class="card">
@@ -983,34 +1175,66 @@
             <p class="label">brightness</p>
             <span class="dot" id="brightness" style="font-size: 2.4rem">--</span>
           </div>
-          <input type="range" id="brightness-slider" min="5" max="100" aria-label="brightness" />
-        </div>
-
-        <div class="card">
-          <p class="label">notifications</p>
-          <div class="stack">
-            <button class="switch" id="dnd" data-on="false">
-              <span>do not disturb<small id="notification-count">—</small></span><i></i>
-            </button>
-            <button data-action='{"type":"notifications","op":"clear"}'>clear all notifications</button>
+          <div id="screens"></div>
+          <p class="hint" id="ddc-hint" hidden></p>
+          <button class="switch" id="night" data-on="false" style="margin-top: 1rem" hidden>
+            <span>night light<small id="night-note">&nbsp;</small></span><i></i>
+          </button>
+          <div id="warmth-row" hidden>
+            <input type="range" id="warmth" min="2500" max="6500" step="100" aria-label="warmth" />
+            <div class="row">
+              <span class="label">warmer</span>
+              <span class="label" id="warmth-value"></span>
+              <span class="label">cooler</span>
+            </div>
           </div>
         </div>
 
         <div class="card">
-          <p class="label">radios</p>
-          <div class="stack">
-            <button class="switch" id="wifi" data-on="false">
-              <span>wi-fi<small>turning it off disconnects this phone</small></span><i></i>
-            </button>
-            <button class="switch" id="bluetooth" data-on="false">
-              <span>bluetooth<small id="bluetooth-note">&nbsp;</small></span><i></i>
-            </button>
+          <div class="row">
+            <p class="label">notifications</p>
+            <p class="label" id="notification-count"></p>
           </div>
+          <div id="notifications-body">
+            <button class="switch" id="dnd" data-on="false" style="margin-top: 1rem">
+              <span>do not disturb<small id="dnd-note">&nbsp;</small></span><i></i>
+            </button>
+            <div class="pills" id="dnd-timers">
+              <button data-mode="hour">for 1 hour</button>
+              <button data-mode="morning">until morning</button>
+            </div>
+            <div class="windows" id="notes"></div>
+            <button class="more" id="notes-more" hidden></button>
+            <p class="hint" id="notes-hint"></p>
+            <button id="notes-clear" style="width: 100%; margin-top: 0.75rem" data-action='{"type":"notifications","op":"clear"}'>clear all</button>
+          </div>
+          <p class="hint" id="notifications-missing" hidden>no notification daemon found: swaync, mako or dunst.</p>
         </div>
 
-        <button class="hold" id="lock" data-hold='{"type":"lock"}' aria-label="hold to lock the screen">
-          <span class="fill"></span><span>hold to lock</span>
-        </button>
+        <div class="card">
+          <p class="label">power</p>
+          <div class="power">
+            <button class="hold" id="lock" data-hold='{"type":"lock"}' aria-label="hold to lock the screen">
+              <span class="fill"></span><span>lock</span>
+            </button>
+            <button class="hold" id="screen-off" data-hold='{"type":"screen","on":false}' aria-label="hold to turn the screens off">
+              <span class="fill"></span><span>screen off</span>
+            </button>
+            <button class="primary" id="screen-on" data-action='{"type":"screen","on":true}' hidden>screen on</button>
+            <button class="hold" data-hold='{"type":"power","op":"sleep"}' aria-label="hold to sleep">
+              <span class="fill"></span><span>sleep</span>
+            </button>
+          </div>
+          <div class="grid-2 power-2">
+            <button class="hold" data-hold='{"type":"power","op":"restart"}' data-confirm="tap to restart" aria-label="hold to restart">
+              <span class="fill"></span><span>restart</span>
+            </button>
+            <button class="hold" data-hold='{"type":"power","op":"shut-down"}' data-confirm="tap to shut down" aria-label="hold to shut down">
+              <span class="fill"></span><span>shut down</span>
+            </button>
+          </div>
+          <p class="hint">hold to confirm</p>
+        </div>
       </section>
 
       <!-- ================================================================ -->

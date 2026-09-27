@@ -30,10 +30,13 @@ export function watchAudioAndMedia(onChange: (stale: Stale) => void) {
       if (followers.length > 0) return;
       followers = [
         // "Event 'change' on sink #56". Sink changes are volume and mute; the
-        // server changes when the default output does, which the sink list shows.
+        // server changes when the default output does, which the outputs show.
         follow(["pactl", "subscribe"], (line) => {
           if (/ on sink #/.test(line)) changed(line.includes("'change'") ? "fast" : "both");
-          else if (/ on server #/.test(line)) changed("both");
+          // App streams and the microphone.
+          else if (/ on (sink-input|source) #/.test(line)) changed("fast");
+          // A card changing profile (to HDMI, say) changes the outputs.
+          else if (/ on (server|card) #/.test(line)) changed("both");
         }),
         // Prints a line whenever any of these change.
         follow(

@@ -3,12 +3,16 @@
 Control a Hyprland desktop from your phone over home Wi-Fi. The phone gets a
 web page, installable as an app, with four tabs:
 
-- **desk**: workspaces in use, each with the app on it (swipe to switch, hold
+- **desk**: Wi-Fi and Bluetooth pills in the header (tap to toggle, hold to
+  open the laptop's menu); workspaces in use, each with the app on it (swipe to switch, hold
   one to move the focused window there); the window list (tap to focus, swipe
   left to close, hold to drag onto a workspace or for fullscreen, float and
   force kill); and media with album art, seeking and volume.
-- **control**: scenes, volume and sound output, brightness, do not disturb and
-  clearing notifications, Wi-Fi and Bluetooth, and hold-to-lock.
+- **control**: scenes (tap again to undo, hold to save what's on now); volume
+  with speakers, headphones, HDMI or Bluetooth, microphone mute and per-app
+  volume; brightness per screen and night light; notifications (tap to open
+  the app, swipe to dismiss) and do not disturb for an hour or until
+  morning; lock, screen off, sleep, restart and shut down.
 - **bridge**: shared clipboard in both directions, opening links, sending
   files to `~/Downloads`, a live preview of any monitor, and system stats.
 - **input**: touchpad, live typing and a presentation clicker.
@@ -41,8 +45,8 @@ Stop autostart: `systemctl --user disable --now hypr-remote ydotoold`.
 
 Moving the pointer works out of the box, through Hyprland. Typing needs
 `wtype`; clicks and scrolling need `ydotool`, which writes to `/dev/uinput`.
-`scripts/setup-input.sh` does all of this with dnf, pacman, apt or zypper.
-By hand:
+`scripts/setup-input.sh` does all of this with dnf, pacman, apt or zypper,
+along with the external screen brightness setup below. By hand:
 
 ```bash
 sudo pacman -S wtype ydotool          # Arch, CachyOS (Fedora: sudo dnf install wtype ydotool)
@@ -57,6 +61,24 @@ The udev rule lets every member of the `input` group create virtual input
 devices, which means any program running as your user can inject keystrokes.
 
 ![The bridge tab with a live screen preview and system stats, and the input tab with the touchpad and keyboard](docs/bridge-input.webp)
+
+### Brightness of external screens
+
+Laptop screens use `brightnessctl`. External monitors are dimmed over DDC/CI,
+which needs `ddcutil` and access to `/dev/i2c-*`. `scripts/setup-input.sh`
+does this too. By hand:
+
+```bash
+sudo pacman -S ddcutil                # Fedora: sudo dnf install ddcutil
+echo i2c-dev | sudo tee /etc/modules-load.d/i2c-dev.conf && sudo modprobe i2c-dev
+getent group i2c || sudo groupadd --system i2c
+sudo usermod -aG i2c "$USER"          # then log out and back in
+echo 'KERNEL=="i2c-[0-9]*", GROUP="i2c", MODE="0660"' | sudo tee /etc/udev/rules.d/80-i2c.rules
+sudo udevadm control --reload && sudo udevadm trigger
+```
+
+Some monitors have DDC/CI turned off in their own menu. Each change takes
+about a second to reach the screen, so their sliders apply when you let go.
 
 ### Install as an app (HTTPS)
 
@@ -74,8 +96,22 @@ anyway.
 ### Scenes
 
 `~/.config/hypr-remote/scenes.json` is created on first run with movie,
-focus, night and day. Each scene can set `volume`, `brightness`, `dnd` and
-`media` (`"play"` or `"pause"`). Restart the service after editing it.
+focus, night and away. Each scene can set `volume`, `brightness` (every
+screen), `dnd`, `nightLight` (a warmth from 2500 to 6500 kelvin, or `false`)
+and `media` (`"play"` or `"pause"`). Changes to the file apply straight away.
+Holding a scene on the phone saves the current volume, brightness, do not
+disturb and night light into it.
+
+### Wi-Fi and Bluetooth menus
+
+Holding a pill opens a menu on the laptop: your Quickshell control center if
+one is running, otherwise `nm-connection-editor` or `blueman-manager`. To
+open something else, give the command in
+`~/.config/hypr-remote/menus.json`:
+
+```json
+{ "wifi": "kitty nmtui", "bluetooth": "blueberry" }
+```
 
 ## Works on
 
@@ -94,10 +130,13 @@ leaves everything else working.
 
 | Feature                    | Needs                         | Common alternatives that won't work |
 | -------------------------- | ----------------------------- | ----------------------------------- |
-| Do not disturb, clearing   | swaync                        | mako, dunst                         |
-| Wi-Fi toggle               | NetworkManager (`nmcli`)      | iwd, systemd-networkd               |
-| Bluetooth toggle           | BlueZ (`bluetoothctl`)        |                                     |
+| Notifications, DND         | swaync, mako or dunst         |                                     |
+| External screen brightness | ddcutil, `/dev/i2c-*` access  |                                     |
+| Night light                | hyprsunset                    | gammastep, wlsunset                 |
+| Wi-Fi pill                 | NetworkManager (`nmcli`)      | iwd, systemd-networkd               |
+| Bluetooth pill             | BlueZ (`bluetoothctl`)        |                                     |
 | Lock                       | hyprlock                      | swaylock (the button does nothing)  |
+| Sleep, restart, shut down  | systemd (`systemctl`)         |                                     |
 | Typing                     | wtype                         |                                     |
 | Clicks and scrolling       | ydotool, `/dev/uinput` access |                                     |
 

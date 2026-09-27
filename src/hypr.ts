@@ -55,6 +55,8 @@ export type Monitor = {
   scale: number;
   focused: boolean;
   activeWorkspace: { id: number };
+  model: string;
+  dpmsStatus: boolean;
 };
 
 export type Client = {
