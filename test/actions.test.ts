@@ -40,7 +40,11 @@ describe("Action", () => {
       { type: "radio-menu", device: "bluetooth" },
       { type: "radio", device: "wifi", on: false },
       { type: "clipboard-set", text: "" },
-      { type: "clipboard-get" },
+      { type: "open-received", name: "photo.jpg" },
+      { type: "open-downloads" },
+      { type: "screen-click", monitor: "eDP-1", x: 0.5, y: 1 },
+      { type: "top-apps" },
+      { type: "quit-app", name: "firefox" },
       { type: "open-link", url: "https://example.com" },
       { type: "type", text: "hello" },
       { type: "key", key: "page-down" },
@@ -61,6 +65,8 @@ describe("Action", () => {
     rejects({ type: "media", command: "stop" });
     rejects({ type: "radio", device: "wifi", on: "true" });
     rejects({ type: "window", op: "move", address: "0x1" });
+    // Clips reach the phone over /clip now.
+    rejects({ type: "clipboard-get" });
   });
 
   test("rejects keys outside the fixed table", () => {
@@ -97,6 +103,10 @@ describe("Action", () => {
     rejects({ type: "media-seek", to: -1 });
     rejects({ type: "media-seek", to: Number.POSITIVE_INFINITY });
     rejects({ type: "media-seek", by: 10 });
+    rejects({ type: "screen-click", monitor: "eDP-1", x: 1.2, y: 0 });
+    rejects({ type: "screen-click", monitor: "eDP-1", x: 0, y: -0.1 });
+    rejects({ type: "quit-app", name: "" });
+    rejects({ type: "open-received", name: "" });
   });
 
   test("accepts workspaces past 10, up to 99", () => {

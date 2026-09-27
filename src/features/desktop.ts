@@ -19,7 +19,7 @@ export type DesktopSnapshot = {
   activeWindow: string | null;
   windows: Window[];
   /** `on` is false while the screen is switched off (DPMS). */
-  monitors: { name: string; focused: boolean; workspace: number; on: boolean }[];
+  monitors: { name: string; label: string; focused: boolean; workspace: number; on: boolean }[];
 };
 
 export async function readDesktop(): Promise<DesktopSnapshot> {
@@ -63,11 +63,18 @@ export function toSnapshot(
     windows,
     monitors: (monitors ?? []).map((monitor) => ({
       name: monitor.name,
+      label: monitorLabel(monitor),
       focused: monitor.focused,
       workspace: monitor.activeWorkspace.id,
       on: monitor.dpmsStatus !== false,
     })),
   };
+}
+
+/** "laptop" for a built-in panel, otherwise the model ("benq gw2255"). */
+export function monitorLabel(monitor: Pick<Monitor, "name" | "model">): string {
+  if (/^(eDP|LVDS|DSI)-/.test(monitor.name)) return "laptop";
+  return (monitor.model.trim() || monitor.name).toLowerCase();
 }
 
 // Last segments of reverse-DNS classes that say nothing about the app.

@@ -7,8 +7,10 @@ import {
   type Output,
   type Volume,
 } from "./features/audio";
+import { readClipboard, type Clipboard } from "./features/clipboard";
 import { readDesktop, type DesktopSnapshot } from "./features/desktop";
 import { readBrightness, readNightLight, type Brightness, type NightLight } from "./features/display";
+import { readFiles, type Files } from "./features/files";
 import { readInputSupport } from "./features/input";
 import { readMedia, type Media } from "./features/media";
 import { readNotifications, type Notifications } from "./features/notifications";
@@ -21,8 +23,9 @@ import { sceneMatches, undoableScene, type Scene, type Settings } from "./scenes
  *
  * Fast: the desktop, volume, microphone, apps and media — things you change
  * and expect to see move. Slow: outputs, brightness, night light, radios,
- * notifications, stats, and which optional tools are installed — things that
- * change rarely, are slow to read (DDC), or only need to be roughly live.
+ * notifications, stats, the clipboard, files to take, and which optional
+ * tools are installed — things that change rarely, are slow to read (DDC), or
+ * only need to be roughly live.
  */
 export type FastState = DesktopSnapshot & {
   volume: Volume | null;
@@ -39,6 +42,8 @@ export type SlowState = {
   radios: Radios;
   stats: Stats;
   input: { keyboard: boolean; clicks: boolean };
+  clipboard: Clipboard;
+  files: Files;
 };
 
 /**
@@ -61,7 +66,7 @@ export async function readFast(): Promise<FastState> {
 }
 
 export async function readSlow(): Promise<SlowState> {
-  const [outputs, brightness, nightLight, notifications, radios, stats, input] = await Promise.all([
+  const [outputs, brightness, nightLight, notifications, radios, stats, input, files] = await Promise.all([
     readOutputs(),
     readBrightness(),
     readNightLight(),
@@ -69,8 +74,9 @@ export async function readSlow(): Promise<SlowState> {
     readRadios(),
     readStats(),
     readInputSupport(),
+    readFiles(),
   ]);
-  return { outputs, brightness, nightLight, notifications, radios, stats, input };
+  return { outputs, brightness, nightLight, notifications, radios, stats, input, clipboard: readClipboard(), files };
 }
 
 export function viewScenes(scenes: Scene[], fast: FastState, slow: SlowState): SceneView[] {

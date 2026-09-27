@@ -32,7 +32,8 @@
         --red: #d71921;
         --dot: "Geist", system-ui, sans-serif;
         --mono: "Geist", system-ui, sans-serif;
-        --nav: 4.75rem;
+        /* The tab bar and the stats strip above it. */
+        --nav: 7rem;
       }
 
       * {
@@ -679,7 +680,7 @@
       }
 
       textarea {
-        min-height: 7rem;
+        min-height: 4.5rem;
         resize: vertical;
         margin-top: 1rem;
       }
@@ -689,15 +690,120 @@
         border-color: var(--muted);
       }
 
-      /* Screen preview */
+      /* Clipboard and files: rows to tap, like the window list. */
+      .clips {
+        display: grid;
+        gap: 0.45rem;
+        margin-top: 0.75rem;
+      }
+
+      .clips:empty {
+        display: none;
+      }
+
+      .clips-label {
+        margin-top: 1.1rem;
+      }
+
+      .clip {
+        display: grid;
+        grid-template-columns: auto 1fr;
+        align-items: center;
+        gap: 0.75rem;
+        width: 100%;
+        min-height: 3rem;
+        padding: 0.55rem 0.9rem;
+        border-radius: 1.1rem;
+        text-align: left;
+        text-transform: none;
+        font-size: 0.82rem;
+      }
+
+      .clip[data-now="true"] {
+        border-color: var(--muted);
+      }
+
+      .clip[data-empty="true"] {
+        color: var(--muted);
+        pointer-events: none;
+      }
+
+      .clip > span:last-child {
+        display: grid;
+        min-width: 0;
+      }
+
+      .clip img,
+      .shot img {
+        display: block;
+        object-fit: cover;
+        background: var(--line);
+      }
+
+      .clip img {
+        width: 3rem;
+        height: 2.2rem;
+        border-radius: 0.5rem;
+      }
+
+      .clip .app,
+      .shot .app {
+        font-size: 0.68rem;
+        letter-spacing: 0.04em;
+        color: var(--muted);
+        text-transform: lowercase;
+      }
+
+      .clip-actions {
+        display: grid;
+        grid-auto-flow: column;
+        grid-auto-columns: 1fr;
+        gap: 0.6rem;
+        margin-top: 0.6rem;
+      }
+
+      .shot {
+        display: grid;
+        grid-template-columns: 5.5rem 1fr;
+        align-items: center;
+        gap: 0.8rem;
+        width: 100%;
+        min-height: 0;
+        margin-top: 0.75rem;
+        padding: 0.45rem 0.9rem 0.45rem 0.45rem;
+        border-radius: 1.1rem;
+        text-align: left;
+      }
+
+      .shot img {
+        width: 5.5rem;
+        height: 3.4rem;
+        border-radius: 0.75rem;
+      }
+
+      .shot > span {
+        display: grid;
+        min-width: 0;
+        font-size: 0.82rem;
+      }
+
+      /* Screen preview: a button, since a tap opens it full size. */
       .screen {
         position: relative;
+        display: block;
+        width: 100%;
+        min-height: 0;
         margin-top: 1rem;
+        padding: 0;
         aspect-ratio: 16 / 9;
         border-radius: 1rem;
         overflow: hidden;
         background: var(--raised);
         border: 1px solid var(--line);
+      }
+
+      .screen:active {
+        transform: scale(0.98);
       }
 
       .screen img {
@@ -707,35 +813,223 @@
         display: block;
       }
 
-      .screen p {
+      .screen > span {
         position: absolute;
         inset: 0;
         display: grid;
         place-items: center;
-        margin: 0;
         font-size: 0.75rem;
         color: var(--muted);
       }
 
-      /* Stats */
-      .stats {
+      /* The screen, filling the phone. */
+      .viewer {
+        position: fixed;
+        inset: 0;
+        z-index: 40;
         display: grid;
-        grid-template-columns: 1fr 1fr;
-        gap: 1.25rem 1rem;
+        grid-template-rows: 1fr auto;
+        background: #000;
+      }
+
+      .viewer-stage {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        overflow: hidden;
+        touch-action: none;
+      }
+
+      #viewer-img {
+        display: block;
+        max-width: 100%;
+        max-height: 100%;
+        transform-origin: center;
+        will-change: transform;
+      }
+
+      .viewer-bar {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 0.75rem;
+        padding: 0.5rem 1rem calc(0.5rem + env(safe-area-inset-bottom));
+      }
+
+      .viewer-bar button {
+        min-height: 2.6rem;
+        font-size: 0.8rem;
+      }
+
+      .tap-dot {
+        position: fixed;
+        z-index: 41;
+        width: 2.4rem;
+        height: 2.4rem;
+        border: 2px solid var(--fg);
+        border-radius: 50%;
+        pointer-events: none;
+        transform: translate(-50%, -50%);
+        animation: tap-dot 450ms ease-out forwards;
+      }
+
+      @keyframes tap-dot {
+        from {
+          opacity: 1;
+          transform: translate(-50%, -50%) scale(0.4);
+        }
+        to {
+          opacity: 0;
+          transform: translate(-50%, -50%) scale(1.2);
+        }
+      }
+
+      /* Stats, floating above the tab bar on every tab. */
+      .stats-strip {
+        display: flex;
+        justify-content: space-between;
+        width: min(100%, 28rem);
+        padding: 0 0.4rem;
+      }
+
+      .stats-strip button {
+        display: flex;
+        align-items: baseline;
+        gap: 0.3rem;
+        min-height: 2rem;
+        padding: 0 0.35rem;
+        border: 0;
+        background: transparent;
+        font-size: 0.72rem;
+      }
+
+      .stats-strip span {
+        color: var(--muted);
+      }
+
+      .stats-strip b {
+        font-weight: 600;
+        font-variant-numeric: tabular-nums;
+      }
+
+      .stats-strip [data-alert="true"] b {
+        color: var(--red);
+      }
+
+      /* A panel over the tab bar: a stat's last ten minutes, or the install guide. */
+      .sheet-backdrop {
+        position: fixed;
+        inset: 0;
+        z-index: 29;
+        background: rgba(0, 0, 0, 0.55);
+      }
+
+      .sheet {
+        position: fixed;
+        left: 50%;
+        bottom: calc(var(--nav) + env(safe-area-inset-bottom) + 0.25rem);
+        z-index: 30;
+        width: min(calc(100% - 2rem), 28rem);
+        max-height: 72vh;
+        overflow-y: auto;
+        transform: translateX(-50%);
+        padding: 1.2rem;
+        border-radius: 1.75rem;
+        background: var(--surface);
+        border: 1px solid var(--line);
+      }
+
+      .sheet-value {
+        margin: 0.5rem 0 0;
+        font-size: 2.4rem;
+      }
+
+      .sheet-value small {
+        font-size: 0.75rem;
+        font-weight: 400;
+        color: var(--muted);
+        margin-left: 0.35rem;
+      }
+
+      .spark {
+        display: block;
+        width: 100%;
+        height: 4.5rem;
+        margin-top: 0.9rem;
+      }
+
+      .spark path {
+        fill: none;
+        stroke: var(--fg);
+        stroke-width: 1.5;
+        vector-effect: non-scaling-stroke;
+      }
+
+      .top-apps {
+        display: grid;
+        gap: 0.4rem;
         margin-top: 1rem;
       }
 
-      .stat .dot {
-        font-size: 2.2rem;
-        margin-top: 0.4rem;
+      .top-apps button {
+        display: flex;
+        justify-content: space-between;
+        min-height: 2.7rem;
+        font-size: 0.8rem;
+        text-transform: none;
+        -webkit-touch-callout: none;
       }
 
-      .stat .unit {
-        font-size: 0.7rem;
-        font-weight: 400;
-        letter-spacing: 0;
+      .top-apps button[data-armed="true"] {
+        background: var(--red);
+        border-color: var(--red);
+      }
+
+      .steps {
+        display: grid;
+        gap: 0.9rem;
+        margin: 1rem 0 0;
+        padding: 0;
+        list-style: none;
+        counter-reset: step;
+      }
+
+      .steps li {
+        display: grid;
+        grid-template-columns: 1.6rem 1fr;
+        gap: 0.7rem;
+        font-size: 0.8rem;
+        line-height: 1.5;
+        counter-increment: step;
+      }
+
+      .steps li::before {
+        content: counter(step);
+        display: grid;
+        place-items: center;
+        width: 1.6rem;
+        height: 1.6rem;
+        border-radius: 50%;
+        border: 1px solid var(--line);
+        font-size: 0.72rem;
+      }
+
+      .steps li[data-done="true"] {
         color: var(--muted);
-        margin-left: 0.25rem;
+      }
+
+      .steps li[data-done="true"]::before {
+        content: "✓";
+        background: var(--fg);
+        color: var(--bg);
+        border-color: var(--fg);
+      }
+
+      .steps button {
+        width: 100%;
+        min-height: 2.7rem;
+        margin-top: 0.5rem;
+        font-size: 0.8rem;
       }
 
       /* Touchpad */
@@ -837,6 +1131,11 @@
 
       .radio-pill[data-live="true"] i {
         background: var(--fg);
+      }
+
+      .install-pill {
+        max-width: none;
+        border-color: var(--fg);
       }
 
       /* Scenes */
@@ -965,12 +1264,14 @@
         position: fixed;
         inset: auto 0 0;
         display: flex;
-        justify-content: center;
+        flex-direction: column;
+        align-items: center;
+        gap: 0.2rem;
         padding: 0.6rem 1rem calc(0.6rem + env(safe-area-inset-bottom));
         background: linear-gradient(to top, #000 60%, transparent);
       }
 
-      nav div {
+      nav [role="tablist"] {
         display: grid;
         grid-template-columns: repeat(4, 1fr);
         gap: 0.25rem;
@@ -1035,6 +1336,20 @@
         transform: translate(-50%, 0);
       }
 
+      .toast[data-show="true"]:has(button) {
+        pointer-events: auto;
+      }
+
+      .toast button {
+        min-height: 0;
+        margin-left: 0.6rem;
+        padding: 0.3rem 0.75rem;
+        border: 0;
+        background: var(--bg);
+        color: var(--fg);
+        font-size: 0.75rem;
+      }
+
       .progress {
         height: 0.25rem;
         margin-top: 0.75rem;
@@ -1055,7 +1370,11 @@
   <body>
     <main>
       <header>
-        <span>hypr-remote</span>
+        <span id="title">hypr-remote</span>
+        <button class="radio-pill install-pill" id="install-pill" hidden>
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 4v11M7 10l5 5 5-5M5 20h14" /></svg>
+          <span>install app</span>
+        </button>
         <span class="status" id="status" data-live="false"><i></i><span id="status-text">connecting</span></span>
         <span class="radio-pills">
           <button class="radio-pill" id="wifi-pill" data-on="false" data-live="false" aria-label="wi-fi">
@@ -1242,23 +1561,39 @@
       <!-- ================================================================ -->
       <section class="tab" id="tab-bridge">
         <div class="card">
-          <p class="label">clipboard</p>
-          <textarea id="clipboard" placeholder="type or paste here…" spellcheck="false"></textarea>
-          <div class="grid-2" style="margin-top: 0.6rem">
-            <button class="primary" id="clipboard-send">send →</button>
-            <button id="clipboard-get">← get</button>
+          <div class="row">
+            <p class="label">clipboard</p>
+            <p class="label">tap one to copy it to your phone</p>
+          </div>
+          <div class="clips" id="clip-now"></div>
+          <p class="label clips-label" id="clip-history-label" hidden>earlier on the laptop</p>
+          <div class="clips" id="clip-history"></div>
+          <textarea class="field" id="clipboard" placeholder="type here, or leave empty to send what your phone copied" spellcheck="false"></textarea>
+          <div class="clip-actions">
+            <button class="primary" id="clipboard-send">send to laptop</button>
+            <button id="link-open" hidden>open on laptop</button>
           </div>
         </div>
 
         <div class="card">
-          <p class="label">send to laptop</p>
+          <p class="label">files</p>
           <div class="stack">
-            <input class="field" id="link" type="url" inputmode="url" placeholder="https://…" autocomplete="off" />
-            <button id="link-open">open link on laptop</button>
-            <button class="primary" id="file-pick">send files to ~/downloads</button>
-            <input id="file" type="file" multiple hidden />
+            <button class="primary" id="file-pick">send files to laptop</button>
           </div>
+          <input id="file" type="file" multiple hidden />
           <div class="progress" id="upload-progress"><span></span></div>
+          <p class="hint">they land in ~/downloads and open on the laptop.</p>
+          <div id="take" hidden>
+            <p class="label clips-label">take from the laptop</p>
+            <button class="shot" id="shot" hidden>
+              <img alt="" />
+              <span>
+                <span class="app">latest screenshot</span>
+                <span class="title truncate" id="shot-name"></span>
+              </span>
+            </button>
+            <div class="clips" id="downloads"></div>
+          </div>
         </div>
 
         <div class="card">
@@ -1267,43 +1602,14 @@
             <p class="label" id="screen-status">paused</p>
           </div>
           <div class="pills" id="monitors"></div>
-          <div class="screen">
+          <button class="screen" id="screen-open" aria-label="open the screen full size">
             <img id="screen" alt="" hidden />
-            <p id="screen-empty">pick a monitor</p>
+            <span id="screen-empty">connecting…</span>
+          </button>
+          <div class="stack">
+            <button id="screen-save">save full size to phone</button>
           </div>
-        </div>
-
-        <div class="card">
-          <p class="label">system</p>
-          <div class="stats">
-            <div class="stat">
-              <p class="label">cpu</p>
-              <p class="dot" style="margin: 0.4rem 0 0"><span id="cpu">--</span><span class="unit">%</span></p>
-              <div class="meter" id="cpu-meter"><span></span></div>
-            </div>
-            <div class="stat">
-              <p class="label">memory</p>
-              <p class="dot" style="margin: 0.4rem 0 0"><span id="memory">--</span><span class="unit">gb</span></p>
-              <div class="meter" id="memory-meter"><span></span></div>
-            </div>
-            <div class="stat">
-              <p class="label" id="battery-label">battery</p>
-              <p class="dot" style="margin: 0.4rem 0 0"><span id="battery">--</span><span class="unit">%</span></p>
-              <div class="meter" id="battery-meter"><span></span></div>
-            </div>
-            <div class="stat">
-              <p class="label">temperature</p>
-              <p class="dot" style="margin: 0.4rem 0 0"><span id="temperature">--</span><span class="unit">°c</span></p>
-              <div class="meter" id="temperature-meter"><span></span></div>
-            </div>
-          </div>
-          <p class="hint" id="uptime"></p>
-        </div>
-
-        <div class="card" id="install-card">
-          <p class="label">install as an app</p>
-          <p class="hint" id="install-text"></p>
-          <div class="stack" id="install-actions"></div>
+          <p class="hint">tap the picture to fill your phone. there, a tap clicks on the laptop and a pinch zooms.</p>
         </div>
       </section>
 
@@ -1359,7 +1665,28 @@
       </section>
     </main>
 
+    <div class="sheet-backdrop" id="sheet-backdrop" hidden></div>
+    <div class="sheet" id="sheet" hidden></div>
+
+    <div class="viewer" id="viewer" hidden>
+      <div class="viewer-stage" id="viewer-stage">
+        <img id="viewer-img" alt="" />
+      </div>
+      <div class="viewer-bar">
+        <button id="viewer-save">save</button>
+        <span class="label" id="viewer-hint">tap to click · pinch to zoom</span>
+        <button id="viewer-close">close</button>
+      </div>
+    </div>
+
     <nav>
+      <div class="stats-strip" id="stats-strip">
+        <button data-stat="cpu"><span>cpu</span><b id="strip-cpu">--</b></button>
+        <button data-stat="memory"><span>ram</span><b id="strip-memory">--</b></button>
+        <button data-stat="battery" id="strip-battery-button"><span id="strip-battery-label">bat</span><b id="strip-battery">--</b></button>
+        <button data-stat="temperature"><span>temp</span><b id="strip-temperature">--</b></button>
+        <button data-stat="disk"><span>disk</span><b id="strip-disk">--</b></button>
+      </div>
       <div role="tablist">
         <button role="tab" data-tab="desk" aria-selected="true">desk</button>
         <button role="tab" data-tab="control" aria-selected="false">control</button>

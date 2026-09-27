@@ -13,8 +13,13 @@ web page, installable as an app, with four tabs:
   volume; brightness per screen and night light; notifications (tap to open
   the app, swipe to dismiss) and do not disturb for an hour or until
   morning; lock, screen off, sleep, restart and shut down.
-- **bridge**: shared clipboard in both directions, opening links, sending
-  files to `~/Downloads`, a live preview of any monitor, and system stats.
+- **bridge**: the clipboard both ways, text or images (what the laptop just
+  copied shows live, with the last few before it; send takes what the phone
+  copied); links open on the laptop; files go to `~/Downloads` and open
+  there, and the latest screenshot and downloads come back to the phone; a
+  live preview of the screen, which opens full size to zoom in and click.
+- System stats sit above the tab bar on every tab; tap one for its last ten
+  minutes, and for CPU and memory the busiest apps (hold one to quit it).
 - **input**: touchpad, live typing and a presentation clicker.
 
 ![The four tabs: desk, control, bridge and input](docs/tabs.webp)
@@ -84,8 +89,11 @@ about a second to reach the screen, so their sliders apply when you let go.
 
 The server makes its own certificate authority in `~/.config/hypr-remote/tls`
 and serves HTTPS on 4443. Browsers only install apps once they trust it, so
-the bridge tab walks you through it: download the certificate, install it as
-a CA certificate on the phone, reload, then install from the browser menu.
+the "install app" pill in the header walks you through it, with the steps
+for your phone ticking off as you go: download the certificate, install it
+as a CA certificate, reload, then install from the browser menu. Installed on
+Android, the remote shows up in the share sheet: share a link to open it on
+the laptop, text to put it on the laptop's clipboard, or files to send them.
 
 Plain HTTP on 4000 only serves the page and the certificate. The remote
 itself refuses it, because anyone on the Wi-Fi could read the token and type
@@ -122,7 +130,7 @@ GNOME, KDE, Sway or other compositors.
 These work anywhere Hyprland runs: workspaces, windows, the pointer, media,
 volume, brightness, clipboard, screen preview, links and files, stats,
 pairing and HTTPS. They use `hyprctl`, `playerctl`, `wpctl` and `pactl`
-(PipeWire), `brightnessctl`, `wl-clipboard`, `grim`, `notify-send` and
+(PipeWire), `brightnessctl`, `wl-clipboard`, `grim`, `xdg-open` and
 `openssl`.
 
 The rest depends on your setup. A missing tool turns off its feature and
@@ -139,6 +147,8 @@ leaves everything else working.
 | Sleep, restart, shut down  | systemd (`systemctl`)         |                                     |
 | Typing                     | wtype                         |                                     |
 | Clicks and scrolling       | ydotool, `/dev/uinput` access |                                     |
+| Clicking on the preview    | ydotool, `/dev/uinput` access |                                     |
+| Clipboard history          | cliphist (else since start)   | clipman                             |
 
 ### Firewall
 
@@ -159,8 +169,9 @@ sudo firewall-cmd --permanent --add-port=4000/tcp --add-port=4443/tcp && sudo fi
 
 ## How it works
 
-- `src/server.ts` serves the page, a WebSocket, `/screen`, `/upload` and
-  `/ca.crt`. Everything except the page, its assets and the certificate needs
+- `src/server.ts` serves the page, a WebSocket, `/screen`, `/upload`,
+  `/clip` and `/clipboard` (clips each way), `/file` (screenshots and
+  downloads, only ones listed in the state), `/art` and `/ca.crt`. Everything except the page, its assets and the certificate needs
   the pairing token, over HTTPS. It listens on the LAN address only.
 - `src/actions.ts` is the whole list of things the phone can do, validated
   with zod. Commands run with a fixed argv and no shell. Window addresses,

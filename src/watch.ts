@@ -54,7 +54,7 @@ export function watchAudioAndMedia(onChange: (stale: Stale) => void) {
 }
 
 /** Runs argv for as long as it's wanted, calling onLine per line of output. */
-function follow(argv: string[], onLine: (line: string) => void) {
+export function follow(argv: string[], onLine: (line: string) => void) {
   let stopped = !installed(argv[0]!);
   let child: Subprocess<"ignore", "pipe", "ignore"> | undefined;
   let retry: ReturnType<typeof setTimeout> | undefined;

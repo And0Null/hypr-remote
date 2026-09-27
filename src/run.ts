@@ -4,7 +4,7 @@
  */
 export async function run(
   argv: string[],
-  options: { input?: string; timeoutMs?: number; discardOutput?: boolean } = {},
+  options: { input?: string | Uint8Array<ArrayBuffer>; timeoutMs?: number; discardOutput?: boolean } = {},
 ): Promise<{ code: number; stdout: string; stderr: string }> {
   if (!Bun.which(argv[0]!)) {
     return { code: 127, stdout: "", stderr: `${argv[0]} is not installed` };
@@ -27,6 +27,14 @@ export async function run(
     child.exited,
   ]);
   return { code, stdout: stdout.trim(), stderr: stderr.trim() };
+}
+
+/** Raw output bytes on success, null on any failure: images, files. */
+export async function readBytes(argv: string[], timeoutMs = 5000): Promise<Uint8Array<ArrayBuffer> | null> {
+  if (!Bun.which(argv[0]!)) return null;
+  const child = Bun.spawn(argv, { stdin: "ignore", stdout: "pipe", stderr: "ignore", timeout: timeoutMs });
+  const [bytes, code] = await Promise.all([new Response(child.stdout).bytes(), child.exited]);
+  return code === 0 ? bytes : null;
 }
 
 /** Output on success, null on any failure. For reads where "unknown" is fine. */

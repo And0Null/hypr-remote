@@ -4,10 +4,13 @@ import type { Server, ServerWebSocket } from "bun";
 
 import { Action, runAction, type Reply } from "./actions";
 import { hyprSocket, prepareEnvironment } from "./env";
+import { CLIP_IMAGE_LIMIT, followClipboard, readClip, setClipboardImage } from "./features/clipboard";
+import { fileFor } from "./features/files";
 import { readArt } from "./features/media";
 import { followNotifications } from "./features/notifications";
-import { captureMonitor } from "./features/screen";
+import { captureMonitor, type Quality } from "./features/screen";
 import { saveUpload } from "./features/send";
+import { startStatsSampler } from "./features/stats";
 import { lanAddress, loadToken, publishPairing, tokenMatches } from "./pairing";
 import { loadScenes, watchScenes } from "./scenes";
 import { readFast, readSlow, viewScenes, type FastState, type SlowState } from "./state";
@@ -130,6 +133,16 @@ watchScenes((next) => {
 // there when one connects.
 followNotifications(() => void refresh("slow"));
 
+// What's copied on the laptop reaches the phone as it's copied.
+followClipboard(() => void refresh("slow"));
+
+// Stats keep ten minutes of history, phone or no phone, and every phone hears
+// when the laptop runs hot.
+startStatsSampler((temperature) => {
+  const message = JSON.stringify({ type: "toast", text: `the laptop is running hot: ${temperature}°c` } satisfies Reply);
+  for (const client of clients) client.send(message);
+});
+
 // Only a fallback now: events cover what changes fast.
 setInterval(() => void refresh("fast"), 5000);
 setInterval(() => void refresh("slow"), 10_000);
@@ -177,7 +190,8 @@ function authorised(request: Request, url?: URL) {
 // Set once HTTPS is up. From then on the token, and with it typing on this
 // laptop, never crosses plain HTTP, where anyone on the Wi-Fi can read it.
 let httpsRunning = false;
-const PAIRED_PATHS = new Set(["/ws", "/screen", "/upload", "/art"]);
+const PAIRED_PATHS = new Set(["/ws", "/screen", "/upload", "/art", "/clip", "/clipboard", "/file"]);
+const QUALITIES = new Set<string>(["preview", "sharp", "full"]);
 
 async function handle(request: Request, server: Server<undefined>): Promise<Response | undefined> {
   const url = new URL(request.url);
@@ -198,10 +212,55 @@ async function handle(request: Request, server: Server<undefined>): Promise<Resp
   // A live look at one monitor.
   if (url.pathname === "/screen") {
     if (!authorised(request)) return new Response("Not paired", { status: 401 });
-    const image = await captureMonitor(url.searchParams.get("m") ?? "");
+    const asked = url.searchParams.get("q") ?? "preview";
+    const quality = (QUALITIES.has(asked) ? asked : "preview") as Quality;
+    const image = await captureMonitor(url.searchParams.get("m") ?? "", quality);
     return image
-      ? new Response(image, { headers: { "Content-Type": "image/jpeg", "Cache-Control": "no-store" } })
+      ? new Response(image, {
+          headers: { "Content-Type": quality === "full" ? "image/png" : "image/jpeg", "Cache-Control": "no-store" },
+        })
       : new Response("No such monitor", { status: 404 });
+  }
+
+  // Something copied on the laptop, by the key in the state it came with.
+  if (url.pathname === "/clip") {
+    if (!authorised(request)) return new Response("Not paired", { status: 401 });
+    const clip = await readClip(url.searchParams.get("k") ?? "");
+    return clip
+      ? new Response(clip.bytes, { headers: { "Content-Type": clip.type, "Cache-Control": "private, max-age=3600" } })
+      : new Response("No such clip", { status: 404 });
+  }
+
+  // An image copied on the phone, onto the laptop's clipboard.
+  if (url.pathname === "/clipboard" && request.method === "POST") {
+    if (!authorised(request)) return new Response("Not paired", { status: 401 });
+    const bytes = new Uint8Array(await request.arrayBuffer());
+    if (bytes.length > CLIP_IMAGE_LIMIT) return new Response("Too large", { status: 413 });
+    return (await setClipboardImage(bytes))
+      ? new Response(null, { status: 204 })
+      : new Response("Not an image", { status: 415 });
+  }
+
+  // A screenshot or download for the phone to keep, by its key in the state.
+  if (url.pathname === "/file") {
+    if (!authorised(request)) return new Response("Not paired", { status: 401 });
+    const path = fileFor(url.searchParams.get("k") ?? "");
+    const file = path ? Bun.file(path) : null;
+    if (!file || !(await file.exists())) return new Response("No such file", { status: 404 });
+    const name = encodeURIComponent(path!.split("/").pop()!);
+    return new Response(file, {
+      headers: {
+        "Content-Disposition": `attachment; filename*=UTF-8''${name}`,
+        "Cache-Control": "private, max-age=3600",
+      },
+    });
+  }
+
+  // Android's share sheet posts here. The service worker catches it and hands
+  // it to the page, which sends it with the token; this only answers when the
+  // worker isn't running yet.
+  if (url.pathname === "/share" && request.method === "POST") {
+    return Response.redirect("/?shared=missed", 303);
   }
 
   // The playing track's album art, by the key in the state it came with.

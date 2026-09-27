@@ -53,6 +53,8 @@ export type Monitor = {
   width: number;
   height: number;
   scale: number;
+  /** 0 upright, 1 and 3 turned sideways, 4 and up flipped. */
+  transform: number;
   focused: boolean;
   activeWorkspace: { id: number };
   model: string;

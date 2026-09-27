@@ -61,13 +61,33 @@ function showBanner(text) {
 
 /** @type {ReturnType<typeof setTimeout> | undefined} */
 let toastTimer;
-/** @param {string} text */
-function toast(text) {
-  $("toast").textContent = text;
-  $("toast").dataset.show = "true";
+/**
+ * A short message over the tab bar, with a button when there's something to
+ * do about it ("open it there").
+ * @param {string} text
+ * @param {{ label: string; run: () => void }} [action]
+ */
+function toast(text, action) {
+  const box = $("toast");
+  box.textContent = text;
+  if (action) {
+    const button = document.createElement("button");
+    button.textContent = action.label;
+    button.addEventListener("click", () => {
+      box.dataset.show = "false";
+      action.run();
+    });
+    box.append(button);
+  }
+  box.dataset.show = "true";
   clearTimeout(toastTimer);
-  toastTimer = setTimeout(() => ($("toast").dataset.show = "false"), 1800);
+  toastTimer = setTimeout(() => (box.dataset.show = "false"), action ? 4000 : 1800);
 }
+
+// Resolves once the first connection opens: shared links wait for it.
+/** @type {() => void} */
+let markOpened = () => {};
+const opened = new Promise((resolve) => (markOpened = () => resolve(undefined)));
 
 function connect() {
   if (!token) {
@@ -79,6 +99,7 @@ function connect() {
 
   socket.onopen = () => {
     everOpened = true;
+    markOpened();
     retry = 500;
     $("status").dataset.live = "true";
     $("wifi-pill").dataset.live = "true";
@@ -91,7 +112,10 @@ function connect() {
     const message = JSON.parse(event.data);
     if (message.type === "state") render(message.state);
     if (message.type === "toast") toast(message.text);
-    if (message.type === "clipboard") receiveClipboard(message.text);
+    if (message.type === "top") {
+      topApps = { cpu: message.cpu, memory: message.memory };
+      renderSheet();
+    }
   };
 
   socket.onclose = () => {
@@ -196,6 +220,7 @@ function render(next) {
   renderControl();
   renderBridge();
   renderInput();
+  renderStrip();
 }
 
 function renderDesk() {
@@ -1185,46 +1210,9 @@ function renderRadios() {
 }
 
 function renderBridge() {
-  // Monitors for the screen preview.
-  const monitors = $("monitors");
-  const key = state.monitors.map((m) => m.name).join();
-  if (monitors.dataset.rendered !== key) {
-    monitors.dataset.rendered = key;
-    monitors.replaceChildren(
-      ...state.monitors.map((monitor) => {
-        const button = document.createElement("button");
-        button.textContent = monitor.name;
-        button.addEventListener("click", () => {
-          previewMonitor = previewMonitor === monitor.name ? null : monitor.name;
-          renderMonitorPills();
-          updateScreenPolling();
-        });
-        button.dataset.name = monitor.name;
-        return button;
-      }),
-    );
-    renderMonitorPills();
-  }
-
-  // Stats
-  const stats = state.stats;
-  $("cpu").textContent = stats.cpu == null ? "--" : pad2(stats.cpu);
-  setMeter("cpu-meter", stats.cpu, (stats.cpu ?? 0) > 85);
-  if (stats.memory) {
-    $("memory").textContent = (stats.memory.used / 1024).toFixed(1);
-    setMeter("memory-meter", (stats.memory.used / stats.memory.total) * 100);
-  }
-  if (stats.battery) {
-    $("battery").textContent = pad2(stats.battery.level);
-    $("battery-label").textContent = stats.battery.charging ? "battery · charging" : "battery";
-    setMeter("battery-meter", stats.battery.level, stats.battery.level <= 15 && !stats.battery.charging);
-  }
-  $("temperature").textContent = String(stats.temperature ?? "--");
-  setMeter("temperature-meter", stats.temperature, (stats.temperature ?? 0) >= 85);
-  if (stats.uptimeMinutes != null) {
-    const hours = Math.floor(stats.uptimeMinutes / 60);
-    $("uptime").textContent = `up ${hours ? `${hours}h ` : ""}${stats.uptimeMinutes % 60}m`;
-  }
+  renderClipboard();
+  renderFiles();
+  renderScreen();
 }
 
 function renderInput() {
@@ -1458,38 +1446,299 @@ tapOrHold($("bluetooth-pill"), {
 });
 
 /* -------------------------------------------------------------------------- */
-/* Bridge: clipboard, links, files, screen                                    */
+/* Bridge: fetching from the laptop                                           */
 /* -------------------------------------------------------------------------- */
 
-$("clipboard-send").addEventListener("click", () => {
-  const text = /** @type {HTMLTextAreaElement} */ ($("clipboard")).value;
-  if (!text) return toast("nothing to send");
-  send({ type: "clipboard-set", text });
-});
+/** @typedef {import("../src/features/clipboard").ClipView} ClipView */
+/** @typedef {import("../src/features/files").FileView} FileView */
+/** @typedef {import("../src/features/stats").TopApp} TopApp */
 
-$("clipboard-get").addEventListener("click", () => send({ type: "clipboard-get" }));
+const clamp = (/** @type {number} */ value, /** @type {number} */ low, /** @type {number} */ high) =>
+  Math.min(Math.max(value, low), high);
 
-/** @param {string} text */
-async function receiveClipboard(text) {
-  /** @type {HTMLTextAreaElement} */ ($("clipboard")).value = text;
-  if (!text) return toast("laptop clipboard is empty");
-  // Writing to the phone's clipboard needs HTTPS; on plain HTTP the text is
-  // still in the box, ready to copy by hand.
+/**
+ * Something paired-only (a clip, a file, a frame), with the token in a header
+ * rather than the URL.
+ * @param {string} path
+ */
+async function fetchPaired(path) {
+  const response = await fetch(path, { headers: { "x-token": token ?? "" }, cache: "no-store" });
+  if (!response.ok) throw new Error(`${path}: ${response.status}`);
+  return response.blob();
+}
+
+/**
+ * Thumbnails as object URLs, fetched once per path; the ones no longer shown
+ * are let go.
+ */
+function thumbCache() {
+  /** @type {Map<string, Promise<string>>} */
+  const urls = new Map();
+  return {
+    /**
+     * @param {string} path
+     * @param {HTMLImageElement} img
+     */
+    show(path, img) {
+      let url = urls.get(path);
+      if (!url) {
+        url = fetchPaired(path).then((blob) => URL.createObjectURL(blob));
+        url.catch(() => urls.delete(path));
+        urls.set(path, url);
+      }
+      url.then((src) => (img.src = src)).catch(() => {});
+    },
+    /** @param {string[]} paths */
+    keep(paths) {
+      for (const [path, url] of urls) {
+        if (paths.includes(path)) continue;
+        urls.delete(path);
+        url.then((src) => URL.revokeObjectURL(src)).catch(() => {});
+      }
+    },
+  };
+}
+const clipThumbs = thumbCache();
+const fileThumbs = thumbCache();
+
+/**
+ * Saves a blob into the phone's downloads.
+ * @param {Blob} blob
+ * @param {string} name
+ */
+function saveBlob(blob, name) {
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = name;
+  document.body.append(link);
+  link.click();
+  link.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 60_000);
+}
+
+/** @param {number} bytes */
+function formatSize(bytes) {
+  if (bytes < 1024) return `${bytes} b`;
+  const units = ["kb", "mb", "gb"];
+  let value = bytes / 1024;
+  let unit = 0;
+  while (value >= 1024 && unit < units.length - 1) {
+    value /= 1024;
+    unit += 1;
+  }
+  return `${value < 10 ? value.toFixed(1) : Math.round(value)} ${units[unit]}`;
+}
+
+/**
+ * A row to tap: a line of text, with a thumbnail and a small label if given.
+ * @param {{ text: string; label?: string; thumb?: { cache: ReturnType<typeof thumbCache>; path: string } }} content
+ * @param {() => void} onTap
+ */
+function tapRow({ text, label, thumb }, onTap) {
+  const row = document.createElement("button");
+  row.className = "clip";
+  if (thumb) {
+    const img = document.createElement("img");
+    img.alt = "";
+    thumb.cache.show(thumb.path, img);
+    row.append(img);
+  } else {
+    row.style.gridTemplateColumns = "minmax(0, 1fr)";
+  }
+  const lines = document.createElement("span");
+  if (label) {
+    const small = document.createElement("span");
+    small.className = "app truncate";
+    small.textContent = label;
+    lines.append(small);
+  }
+  const line = document.createElement("span");
+  line.className = "truncate";
+  // textContent: the clipboard and file names are anyone's text.
+  line.textContent = text;
+  lines.append(line);
+  row.append(lines);
+  row.addEventListener("click", onTap);
+  return row;
+}
+
+/* -------------------------------------------------------------------------- */
+/* Bridge: clipboard                                                          */
+/* -------------------------------------------------------------------------- */
+
+let clipsKey = "";
+const clipPath = (/** @type {ClipView} */ clip) => `/clip?k=${encodeURIComponent(clip.key)}`;
+
+function renderClipboard() {
+  const { current, history } = state.clipboard;
+  const key = JSON.stringify([current, history]);
+  if (key === clipsKey) return;
+  clipsKey = key;
+
+  /**
+   * @param {ClipView} clip
+   * @param {string} [label]
+   */
+  const clipRow = (clip, label) =>
+    tapRow(
+      {
+        text: clip.kind === "image" ? `image · ${clip.preview}` : clip.preview,
+        label,
+        thumb: clip.kind === "image" ? { cache: clipThumbs, path: clipPath(clip) } : undefined,
+      },
+      () => copyToPhone(clip),
+    );
+
+  if (current) {
+    const row = clipRow(current, "copied on the laptop");
+    row.dataset.now = "true";
+    $("clip-now").replaceChildren(row);
+  } else {
+    const empty = document.createElement("div");
+    empty.className = "clip";
+    empty.dataset.empty = "true";
+    empty.textContent = "nothing copied on the laptop yet";
+    $("clip-now").replaceChildren(empty);
+  }
+  $("clip-history-label").hidden = history.length === 0;
+  $("clip-history").replaceChildren(...history.map((clip) => clipRow(clip)));
+  clipThumbs.keep([...(current ? [current] : []), ...history].map(clipPath));
+}
+
+/**
+ * A PNG of any image the browser can draw: phones only take PNGs as copied
+ * images.
+ * @param {Blob} blob
+ * @returns {Promise<Blob>}
+ */
+async function asPng(blob) {
+  if (blob.type === "image/png") return blob;
+  const bitmap = await createImageBitmap(blob);
+  const canvas = document.createElement("canvas");
+  canvas.width = bitmap.width;
+  canvas.height = bitmap.height;
+  canvas.getContext("2d")?.drawImage(bitmap, 0, 0);
+  return new Promise((resolve, reject) =>
+    canvas.toBlob((png) => (png ? resolve(png) : reject(new Error("no png"))), "image/png"),
+  );
+}
+
+/**
+ * Copies a laptop clip onto the phone. The clipboard item is made inside the
+ * tap, with its bytes still on the way: Safari only lets a write that starts
+ * in the tap through.
+ * @param {ClipView} clip
+ */
+async function copyToPhone(clip) {
+  const image = clip.kind === "image";
+  const blob = fetchPaired(clipPath(clip)).then((raw) =>
+    image ? asPng(raw) : new Blob([raw], { type: "text/plain" }),
+  );
+  blob.catch(() => {});
   try {
-    await navigator.clipboard.writeText(text);
-    toast("copied to phone");
+    if (typeof ClipboardItem === "undefined" || !navigator.clipboard?.write) throw new Error("no clipboard");
+    await navigator.clipboard.write([new ClipboardItem({ [image ? "image/png" : "text/plain"]: blob })]);
+    toast(image ? "image copied to your phone" : "copied to your phone");
+    return;
+  } catch {}
+  // Plain HTTP, or an older browser.
+  try {
+    if (image) {
+      saveBlob(await blob, "clipboard.png");
+      toast("saved the image to your phone");
+      return;
+    }
+    const text = await (await blob).text();
+    try {
+      await navigator.clipboard.writeText(text);
+      toast("copied to your phone");
+    } catch {
+      clipboardBox.value = text;
+      updateLinkButton();
+      toast("it's in the box: long-press it to copy");
+    }
   } catch {
-    toast("got it — long-press the box to copy");
+    toast("couldn't get that from the laptop");
   }
 }
 
-$("link-open").addEventListener("click", () => {
-  const url = /** @type {HTMLInputElement} */ ($("link")).value.trim();
-  if (!url) return toast("paste a link first");
-  send({ type: "open-link", url: /^https?:\/\//i.test(url) ? url : `https://${url}` });
+const clipboardBox = /** @type {HTMLTextAreaElement} */ ($("clipboard"));
+
+/** "https://…", or a bare "example.com/page". One word, no spaces. */
+const isLink = (/** @type {string} */ text) =>
+  /^(https?:\/\/\S+|[\w-]+(\.[\w-]+)*\.[a-z]{2,}(:\d+)?(\/\S*)?)$/i.test(text.trim());
+const asUrl = (/** @type {string} */ text) => (/^https?:\/\//i.test(text.trim()) ? text.trim() : `https://${text.trim()}`);
+
+function updateLinkButton() {
+  $("link-open").hidden = !isLink(clipboardBox.value);
+}
+clipboardBox.addEventListener("input", updateLinkButton);
+
+/** @param {string} text */
+function sendText(text) {
+  if (!send({ type: "clipboard-set", text })) return toast("not connected to the laptop");
+  if (isLink(text)) {
+    toast("copied to laptop", { label: "open it there", run: () => send({ type: "open-link", url: asUrl(text) }) });
+  } else {
+    toast("copied to laptop");
+  }
+}
+
+/** @param {Blob} blob */
+async function sendImage(blob) {
+  const response = await fetch("/clipboard", { method: "POST", headers: { "x-token": token ?? "" }, body: blob });
+  toast(response.ok ? "image copied to laptop" : "the laptop didn't take that image");
+}
+
+/**
+ * What the phone has copied: an image if there is one, else text. Browsers
+ * ask the first time, and some only offer text.
+ * @returns {Promise<string | Blob>}
+ */
+async function readPhoneClipboard() {
+  if (navigator.clipboard?.read) {
+    try {
+      for (const item of await navigator.clipboard.read()) {
+        const image = item.types.find((type) => type.startsWith("image/"));
+        if (image) return item.getType(image);
+        if (item.types.includes("text/plain")) return (await item.getType("text/plain")).text();
+      }
+    } catch {}
+  }
+  return navigator.clipboard.readText();
+}
+
+// Typed text wins; with the box empty, what the phone copied goes.
+$("clipboard-send").addEventListener("click", async () => {
+  const typed = clipboardBox.value;
+  if (typed) {
+    sendText(typed);
+    clipboardBox.value = "";
+    updateLinkButton();
+    return;
+  }
+  try {
+    const copied = await readPhoneClipboard();
+    if (typeof copied !== "string") return await sendImage(copied);
+    if (!copied) return toast("your phone's clipboard is empty");
+    sendText(copied);
+  } catch {
+    toast("your phone kept its clipboard: paste into the box, then send");
+    clipboardBox.focus();
+  }
 });
 
-$("file-pick").addEventListener("click", () => $("file").click());
+$("link-open").addEventListener("click", () => {
+  send({ type: "open-link", url: asUrl(clipboardBox.value) });
+  clipboardBox.value = "";
+  updateLinkButton();
+});
+
+/* -------------------------------------------------------------------------- */
+/* Bridge: files                                                              */
+/* -------------------------------------------------------------------------- */
+
 /**
  * One file per request, as the raw body, so the laptop can stream it straight
  * to disk. XHR rather than fetch: it reports upload progress. Resolves to the
@@ -1511,15 +1760,18 @@ function uploadFile(file, onProgress) {
   });
 }
 
-$("file").addEventListener("change", async () => {
-  const input = /** @type {HTMLInputElement} */ ($("file"));
-  const files = [.../** @type {FileList} */ (input.files)];
-  if (!files.length) return;
+/**
+ * Sends files to ~/Downloads, then opens them on the laptop: one file in its
+ * app, several as their folder.
+ * @param {File[]} files
+ */
+async function uploadAndOpen(files) {
   const bar = $("upload-progress");
   const fill = /** @type {HTMLElement} */ (bar.firstElementChild);
   bar.style.display = "block";
   const total = files.reduce((sum, file) => sum + file.size, 0) || 1;
   let done = 0;
+  /** @type {string[]} */
   const saved = [];
   for (const file of files) {
     const name = await uploadFile(file, (loaded) => {
@@ -1530,75 +1782,563 @@ $("file").addEventListener("change", async () => {
   }
   bar.style.display = "none";
   fill.style.width = "0";
+  await opened;
+  if (!saved.length) return toast("sending failed");
+  if (saved.length === 1) send({ type: "open-received", name: /** @type {string} */ (saved[0]) });
+  else send({ type: "open-downloads" });
+  if (saved.length < files.length) toast(`sent ${saved.length} of ${files.length} files`);
+  else toast(saved.length === 1 ? `opened ${saved[0]} on the laptop` : `sent ${saved.length} files, opened the folder`);
+}
+
+$("file-pick").addEventListener("click", () => $("file").click());
+$("file").addEventListener("change", async () => {
+  const input = /** @type {HTMLInputElement} */ ($("file"));
+  const files = [.../** @type {FileList} */ (input.files)];
   input.value = "";
-  if (!saved.length) toast("upload failed");
-  else if (saved.length < files.length) toast(`saved ${saved.length} of ${files.length} files`);
-  else toast(saved.length === 1 ? `saved ${saved[0]}` : `saved ${saved.length} files`);
+  if (files.length) await uploadAndOpen(files);
 });
 
-// Screen preview: polled only while the bridge tab is open and a monitor is
-// picked, and each frame is requested only after the last one arrived.
+let filesKey = "";
+const filePath = (/** @type {FileView} */ file) => `/file?k=${encodeURIComponent(file.key)}`;
+
+function renderFiles() {
+  const { screenshot, downloads } = state.files;
+  // Ages are part of the key, so "2m" becomes "3m".
+  const key = JSON.stringify([screenshot?.key, downloads.map((file) => file.key), [screenshot, ...downloads].map((file) => file && timeAgo(file.time))]);
+  if (key === filesKey) return;
+  filesKey = key;
+
+  $("take").hidden = !screenshot && downloads.length === 0;
+  $("shot").hidden = !screenshot;
+  if (screenshot) {
+    $("shot-name").textContent = `${timeAgo(screenshot.time)} · ${screenshot.name}`;
+    fileThumbs.show(filePath(screenshot), /** @type {HTMLImageElement} */ ($("shot").querySelector("img")));
+  }
+  $("downloads").replaceChildren(
+    ...downloads.map((file) =>
+      tapRow(
+        {
+          text: file.name,
+          label: `${formatSize(file.size)} · ${timeAgo(file.time)}`,
+          thumb: file.image ? { cache: fileThumbs, path: filePath(file) } : undefined,
+        },
+        () => takeFile(file),
+      ),
+    ),
+  );
+  fileThumbs.keep([...(screenshot ? [screenshot] : []), ...downloads.filter((file) => file.image)].map(filePath));
+}
+
+/** @param {FileView} file */
+async function takeFile(file) {
+  toast(`getting ${file.name}…`);
+  try {
+    saveBlob(await fetchPaired(filePath(file)), file.name);
+    toast(`saved ${file.name} to your phone`);
+  } catch {
+    toast("couldn't get that file");
+  }
+}
+
+$("shot").addEventListener("click", () => state.files.screenshot && takeFile(state.files.screenshot));
+
+/* -------------------------------------------------------------------------- */
+/* Bridge: screen                                                             */
+/* -------------------------------------------------------------------------- */
+
+// The monitor picked on the phone; until then, the one you're working on.
 /** @type {string | null} */
-let previewMonitor = null;
+let pickedMonitor = null;
 /** @type {ReturnType<typeof setTimeout> | undefined} */
 let previewTimer = undefined;
-// Frames are fetched with the token in a header, not the URL, and shown
-// through object URLs; the previous one is revoked so frames don't pile up.
+let framePending = false;
+let viewerOpen = false;
+// Frames are shown through object URLs; the previous one is revoked so they
+// don't pile up.
 /** @type {string | null} */
 let previewUrl = null;
 
-/** @param {string | null} url */
+function previewMonitor() {
+  const monitors = state?.monitors ?? [];
+  if (pickedMonitor && monitors.some((monitor) => monitor.name === pickedMonitor)) return pickedMonitor;
+  return monitors.find((monitor) => monitor.focused)?.name ?? monitors[0]?.name ?? null;
+}
+
+/** @param {string} url */
 function showFrame(url) {
   const old = previewUrl;
   previewUrl = url;
-  if (url) /** @type {HTMLImageElement} */ ($("screen")).src = url;
-  else $("screen").removeAttribute("src");
+  /** @type {HTMLImageElement} */ ($("screen")).src = url;
+  /** @type {HTMLImageElement} */ ($("viewer-img")).src = url;
+  $("screen").hidden = false;
+  $("screen-empty").hidden = true;
   if (old) URL.revokeObjectURL(old);
 }
 
+function renderScreen() {
+  const monitors = $("monitors");
+  const key = state.monitors.map((monitor) => `${monitor.name}:${monitor.label}`).join();
+  if (monitors.dataset.rendered !== key) {
+    monitors.dataset.rendered = key;
+    monitors.replaceChildren(
+      ...state.monitors.map((monitor) => {
+        const button = document.createElement("button");
+        button.textContent = monitor.label;
+        button.dataset.name = monitor.name;
+        button.addEventListener("click", () => {
+          pickedMonitor = monitor.name;
+          renderMonitorPills();
+          clearTimeout(previewTimer);
+          updateScreenPolling();
+        });
+        return button;
+      }),
+    );
+  }
+  // One screen needs no choosing.
+  monitors.hidden = state.monitors.length < 2;
+  renderMonitorPills();
+  if (previewTimer === undefined && !framePending) updateScreenPolling();
+}
+
 function renderMonitorPills() {
+  const current = previewMonitor();
   /** @type {NodeListOf<HTMLElement>} */ (document.querySelectorAll("#monitors button")).forEach((button) => {
-    button.dataset.active = String(button.dataset.name === previewMonitor);
+    button.dataset.active = String(button.dataset.name === current);
   });
 }
 
+/**
+ * Frames are fetched only while someone can see them (the bridge tab, or the
+ * full-size view), each one after the last arrived: about one a second.
+ */
 function updateScreenPolling() {
-  const visible = $("tab-bridge")?.dataset.active === "true" && document.visibilityState === "visible";
   clearTimeout(previewTimer);
-  if (!previewMonitor || !visible) {
+  previewTimer = undefined;
+  const name = state ? previewMonitor() : null;
+  const visible =
+    document.visibilityState === "visible" && (viewerOpen || $("tab-bridge").dataset.active === "true");
+  if (!name || !visible) {
     $("screen-status").textContent = "paused";
-    if (!previewMonitor) {
-      $("screen").hidden = true;
-      $("screen-empty").hidden = false;
-      showFrame(null);
-    }
     return;
   }
   $("screen-status").textContent = "live";
-  fetch(`/screen?m=${encodeURIComponent(previewMonitor)}`, { headers: { "x-token": token ?? "" }, cache: "no-store" })
-    .then((response) => {
-      if (!response.ok) throw new Error(`screen: ${response.status}`);
-      return response.blob();
-    })
-    .then((blob) => {
-      // Decoded off-screen first, so the preview never flashes blank.
-      const url = URL.createObjectURL(blob);
-      const image = new Image();
-      image.onload = () => {
-        showFrame(url);
-        $("screen").hidden = false;
-        $("screen-empty").hidden = true;
-        previewTimer = setTimeout(updateScreenPolling, 1200);
-      };
-      image.onerror = () => {
-        URL.revokeObjectURL(url);
-        previewTimer = setTimeout(updateScreenPolling, 3000);
-      };
-      image.src = url;
-    })
-    .catch(() => (previewTimer = setTimeout(updateScreenPolling, 3000)));
+  if (framePending) return;
+  framePending = true;
+  let delay = 3000;
+  fetchPaired(`/screen?m=${encodeURIComponent(name)}&q=${viewerOpen ? "sharp" : "preview"}`)
+    .then(
+      (blob) =>
+        new Promise((resolve) => {
+          // Decoded off-screen first, so the preview never flashes blank.
+          const url = URL.createObjectURL(blob);
+          const image = new Image();
+          image.onload = () => {
+            showFrame(url);
+            delay = 1000;
+            resolve(undefined);
+          };
+          image.onerror = () => {
+            URL.revokeObjectURL(url);
+            resolve(undefined);
+          };
+          image.src = url;
+        }),
+    )
+    .catch(() => {})
+    .finally(() => {
+      framePending = false;
+      previewTimer = setTimeout(updateScreenPolling, delay);
+    });
 }
 document.addEventListener("visibilitychange", updateScreenPolling);
+
+async function saveScreen() {
+  const name = previewMonitor();
+  if (!name) return;
+  const label = state.monitors.find((monitor) => monitor.name === name)?.label ?? name;
+  const stamp = new Date().toISOString().slice(0, 19).replace(/[:T]/g, "-");
+  toast("taking the screen…");
+  try {
+    saveBlob(await fetchPaired(`/screen?m=${encodeURIComponent(name)}&q=full`), `screen-${label.replace(/\W+/g, "-")}-${stamp}.png`);
+    toast("saved to your phone");
+  } catch {
+    toast("couldn't take the screen");
+  }
+}
+$("screen-save").addEventListener("click", saveScreen);
+$("viewer-save").addEventListener("click", saveScreen);
+
+/* The full-size view: pinch to zoom, drag to pan, tap to click there. */
+
+const viewer = $("viewer");
+const viewerImg = /** @type {HTMLImageElement} */ ($("viewer-img"));
+const stage = $("viewer-stage");
+let view = { scale: 1, x: 0, y: 0 };
+
+function applyView() {
+  viewerImg.style.transform = `translate(${view.x}px, ${view.y}px) scale(${view.scale})`;
+}
+
+/** Keeps a zoomed picture covering the view: no panning off into black. */
+function clampView() {
+  const maxX = ((view.scale - 1) * viewerImg.offsetWidth) / 2;
+  const maxY = ((view.scale - 1) * viewerImg.offsetHeight) / 2;
+  view.x = clamp(view.x, -maxX, maxX);
+  view.y = clamp(view.y, -maxY, maxY);
+}
+
+function openViewer() {
+  if (!previewMonitor()) return;
+  viewerOpen = true;
+  viewer.hidden = false;
+  view = { scale: 1, x: 0, y: 0 };
+  applyView();
+  $("viewer-hint").textContent = state.input.clicks
+    ? "tap to click · pinch to zoom"
+    : "pinch to zoom · clicks need ydotool";
+  // Back closes it, as it would any full-screen view.
+  history.pushState({ viewer: true }, "");
+  /** @type {any} */
+  const orientation = window.screen.orientation;
+  document.documentElement
+    .requestFullscreen?.()
+    .then(() => orientation?.lock?.("landscape"))
+    .catch(() => {});
+  clearTimeout(previewTimer);
+  updateScreenPolling();
+}
+
+function closeViewer(fromHistory = false) {
+  if (!viewerOpen) return;
+  viewerOpen = false;
+  viewer.hidden = true;
+  if (document.fullscreenElement) document.exitFullscreen().catch(() => {});
+  if (!fromHistory && history.state?.viewer) history.back();
+  updateScreenPolling();
+}
+
+$("screen-open").addEventListener("click", openViewer);
+$("viewer-close").addEventListener("click", () => closeViewer());
+window.addEventListener("popstate", () => closeViewer(true));
+
+/** @type {Map<number, { x: number; y: number }>} */
+const fingers = new Map();
+/** @type {{ at: number; x: number; y: number; moved: boolean; multi: boolean } | null} */
+let press = null;
+/** @type {{ distance: number; scale: number; midX: number; midY: number; x: number; y: number } | null} */
+let pinch = null;
+
+function startPinch() {
+  const [a, b] = [...fingers.values()];
+  if (!a || !b) return;
+  pinch = {
+    distance: Math.hypot(a.x - b.x, a.y - b.y) || 1,
+    scale: view.scale,
+    midX: (a.x + b.x) / 2,
+    midY: (a.y + b.y) / 2,
+    x: view.x,
+    y: view.y,
+  };
+}
+
+stage.addEventListener("pointerdown", (event) => {
+  stage.setPointerCapture(event.pointerId);
+  fingers.set(event.pointerId, { x: event.clientX, y: event.clientY });
+  if (fingers.size === 1) press = { at: Date.now(), x: event.clientX, y: event.clientY, moved: false, multi: false };
+  else {
+    if (press) press.multi = true;
+    startPinch();
+  }
+});
+
+stage.addEventListener("pointermove", (event) => {
+  const last = fingers.get(event.pointerId);
+  if (!last) return;
+  const point = { x: event.clientX, y: event.clientY };
+  fingers.set(event.pointerId, point);
+  if (press && Math.hypot(point.x - press.x, point.y - press.y) > 8) press.moved = true;
+
+  if (fingers.size >= 2 && pinch) {
+    const [a, b] = /** @type {[{ x: number; y: number }, { x: number; y: number }]} */ ([...fingers.values()]);
+    const scale = clamp((pinch.scale * Math.hypot(a.x - b.x, a.y - b.y)) / pinch.distance, 1, 6);
+    // The spot under the fingers stays under them as the picture grows.
+    const rect = stage.getBoundingClientRect();
+    const center = { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 };
+    const ratio = scale / pinch.scale;
+    view.scale = scale;
+    view.x = (a.x + b.x) / 2 - center.x - (pinch.midX - center.x - pinch.x) * ratio;
+    view.y = (a.y + b.y) / 2 - center.y - (pinch.midY - center.y - pinch.y) * ratio;
+  } else if (fingers.size === 1 && view.scale > 1 && press?.moved) {
+    view.x += point.x - last.x;
+    view.y += point.y - last.y;
+  } else {
+    return;
+  }
+  clampView();
+  applyView();
+});
+
+/** @param {PointerEvent} event */
+function endFinger(event) {
+  fingers.delete(event.pointerId);
+  if (fingers.size < 2) pinch = null;
+  if (fingers.size > 0 || !press) return;
+  const tap = event.type === "pointerup" && !press.moved && !press.multi && Date.now() - press.at < 350;
+  press = null;
+  if (view.scale < 1.05) {
+    view = { scale: 1, x: 0, y: 0 };
+    applyView();
+  }
+  if (tap) clickAt(event.clientX, event.clientY);
+}
+stage.addEventListener("pointerup", endFinger);
+stage.addEventListener("pointercancel", endFinger);
+
+/**
+ * Clicks on the laptop where the picture was tapped, as a fraction across
+ * and down it; the laptop works out where that is.
+ * @param {number} x
+ * @param {number} y
+ */
+function clickAt(x, y) {
+  const rect = viewerImg.getBoundingClientRect();
+  const across = (x - rect.left) / rect.width;
+  const down = (y - rect.top) / rect.height;
+  const name = previewMonitor();
+  if (!name || across < 0 || across > 1 || down < 0 || down > 1) return;
+  send({ type: "screen-click", monitor: name, x: across, y: down });
+  const dot = document.createElement("span");
+  dot.className = "tap-dot";
+  dot.style.left = `${x}px`;
+  dot.style.top = `${y}px`;
+  document.body.append(dot);
+  setTimeout(() => dot.remove(), 500);
+  // Show what the click did now, not on the next frame.
+  setTimeout(() => {
+    if (!framePending) updateScreenPolling();
+  }, 300);
+}
+
+/* -------------------------------------------------------------------------- */
+/* Stats: the strip above the tab bar, and its panel                          */
+/* -------------------------------------------------------------------------- */
+
+/** @typedef {"cpu" | "memory" | "battery" | "temperature" | "disk"} StatName */
+
+/** Megabytes as gigabytes: "6.1", or "120" once there's no room for a decimal. */
+const gb = (/** @type {number} */ mb) => (mb / 1024).toFixed(mb >= 100 * 1024 ? 0 : 1);
+
+/**
+ * @param {StatName} name
+ * @param {string} text
+ * @param {boolean} alert
+ */
+function setStrip(name, text, alert) {
+  const value = $(`strip-${name}`);
+  value.textContent = text;
+  /** @type {HTMLElement} */ (value.parentElement).dataset.alert = String(alert);
+}
+
+function renderStrip() {
+  const { cpu, memory, battery, temperature, disk } = state.stats;
+  setStrip("cpu", cpu == null ? "--" : `${cpu}%`, (cpu ?? 0) > 85);
+  setStrip("memory", memory ? `${gb(memory.used)}g` : "--", memory ? memory.used / memory.total > 0.9 : false);
+  // A desktop has no battery to show.
+  $("strip-battery-button").hidden = !battery;
+  if (battery) {
+    $("strip-battery-label").textContent = battery.charging ? "chg" : "bat";
+    setStrip("battery", `${battery.level}%`, battery.level <= 15 && !battery.charging);
+  }
+  setStrip("temperature", temperature == null ? "--" : `${temperature}°`, (temperature ?? 0) >= 85);
+  setStrip("disk", disk ? `${gb(disk.free)}g` : "--", disk ? disk.free / disk.total < 0.05 : false);
+  renderSheet();
+}
+
+/** @type {NodeListOf<HTMLElement>} */ (document.querySelectorAll("#stats-strip button")).forEach((button) =>
+  button.addEventListener("click", () =>
+    openSheet({ kind: "stat", stat: /** @type {StatName} */ (button.dataset.stat) }),
+  ),
+);
+
+/** @type {{ kind: "stat"; stat: StatName } | { kind: "install" } | null} */
+let sheet = null;
+let sheetKey = "";
+/** @type {{ cpu: TopApp[]; memory: TopApp[] } | null} */
+let topApps = null;
+/** @type {ReturnType<typeof setInterval> | undefined} */
+let topTimer;
+// The app held to quit, waiting for its confirming tap.
+/** @type {string | null} */
+let armedApp = null;
+/** @type {ReturnType<typeof setTimeout> | undefined} */
+let disarmApp;
+// Rows aren't rebuilt under a finger, or a hold would lose its button.
+let touchingTop = false;
+
+/** @param {NonNullable<typeof sheet>} next */
+function openSheet(next) {
+  sheet = next;
+  sheetKey = "";
+  topApps = null;
+  armedApp = null;
+  $("sheet").hidden = false;
+  $("sheet-backdrop").hidden = false;
+  clearInterval(topTimer);
+  if (next.kind === "stat" && (next.stat === "cpu" || next.stat === "memory")) {
+    send({ type: "top-apps" }, { buzz: false });
+    topTimer = setInterval(() => send({ type: "top-apps" }, { buzz: false }), 3000);
+  }
+  renderSheet();
+}
+
+function closeSheet() {
+  sheet = null;
+  clearInterval(topTimer);
+  $("sheet").hidden = true;
+  $("sheet-backdrop").hidden = true;
+}
+$("sheet-backdrop").addEventListener("click", closeSheet);
+
+/**
+ * A stat's figure, the words after it, and the range its graph spans.
+ * @param {StatName} stat
+ * @param {State["stats"]} stats
+ * @returns {{ title: string; value: string; unit: string; range: [number, number] }}
+ */
+function statView(stat, stats) {
+  const { cpu, memory, battery, temperature, disk } = stats;
+  switch (stat) {
+    case "cpu":
+      return { title: "cpu", value: cpu == null ? "--" : String(cpu), unit: "%", range: [0, 100] };
+    case "memory":
+      return memory
+        ? { title: "memory", value: gb(memory.used), unit: `of ${gb(memory.total)} gb`, range: [0, memory.total] }
+        : { title: "memory", value: "--", unit: "", range: [0, 1] };
+    case "battery":
+      return {
+        title: "battery",
+        value: battery ? String(battery.level) : "--",
+        unit: battery?.charging ? "% · charging" : "%",
+        range: [0, 100],
+      };
+    case "temperature":
+      return { title: "temperature", value: temperature == null ? "--" : String(temperature), unit: "°c", range: [30, 100] };
+    case "disk":
+      return disk
+        ? { title: "disk", value: gb(disk.free), unit: `gb free of ${gb(disk.total)}`, range: [0, disk.total] }
+        : { title: "disk", value: "--", unit: "", range: [0, 1] };
+  }
+}
+
+/**
+ * An SVG path through the last ten minutes, right-aligned so "now" is always
+ * at the right edge. Gaps (no reading) break the line.
+ * @param {(number | null)[]} values
+ * @param {[number, number]} range
+ */
+function sparkPath(values, [low, high]) {
+  const step = 100 / 59;
+  let path = "";
+  let drawing = false;
+  values.forEach((value, index) => {
+    if (value === null) {
+      drawing = false;
+      return;
+    }
+    const x = 100 - (values.length - 1 - index) * step;
+    const y = 39 - (clamp((value - low) / (high - low || 1), 0, 1) * 38);
+    path += `${drawing ? "L" : "M"}${x.toFixed(2)} ${y.toFixed(2)}`;
+    drawing = true;
+  });
+  return path;
+}
+
+function renderSheet() {
+  if (!sheet) return;
+  if (sheet.kind === "install") {
+    renderInstallSheet().catch(() => {});
+    return;
+  }
+  if (!state || touchingTop) return;
+  const { stat } = sheet;
+  const stats = state.stats;
+  const shown = statView(stat, stats);
+  const apps = stat === "cpu" ? topApps?.cpu : stat === "memory" ? topApps?.memory : undefined;
+  const key = JSON.stringify([stat, shown, stats.history[stat], stats.uptimeMinutes, apps, armedApp]);
+  if (key === sheetKey) return;
+  sheetKey = key;
+
+  const box = $("sheet");
+  box.innerHTML = `
+    <div class="row"><p class="label"></p><p class="label"></p></div>
+    <p class="dot sheet-value"><span></span><small></small></p>
+    <svg class="spark" viewBox="0 0 100 40" preserveAspectRatio="none" aria-hidden="true"><path /></svg>
+    <p class="hint"></p>`;
+  const [title, uptime] = /** @type {HTMLElement[]} */ ([...box.querySelectorAll(".row .label")]);
+  /** @type {HTMLElement} */ (title).textContent = shown.title;
+  if (stats.uptimeMinutes != null) {
+    const hours = Math.floor(stats.uptimeMinutes / 60);
+    /** @type {HTMLElement} */ (uptime).textContent = `up ${hours ? `${hours}h ` : ""}${stats.uptimeMinutes % 60}m`;
+  }
+  /** @type {HTMLElement} */ (box.querySelector(".sheet-value span")).textContent = shown.value;
+  /** @type {HTMLElement} */ (box.querySelector(".sheet-value small")).textContent = shown.unit;
+  const history = stats.history[stat];
+  /** @type {SVGPathElement} */ (box.querySelector(".spark path")).setAttribute("d", sparkPath(history, shown.range));
+  /** @type {HTMLElement} */ (box.querySelector(".hint")).textContent =
+    history.filter((value) => value !== null).length < 2 ? "collecting the last 10 minutes…" : "the last 10 minutes";
+
+  if (apps === undefined) return;
+  const label = document.createElement("p");
+  label.className = "label";
+  label.style.marginTop = "1.1rem";
+  label.textContent = apps.length ? `${stat === "cpu" ? "busiest" : "largest"} apps · hold one to quit it` : "looking…";
+  const list = document.createElement("div");
+  list.className = "top-apps";
+  list.addEventListener("pointerdown", () => (touchingTop = true));
+  list.replaceChildren(
+    ...apps.map((app) => {
+      const button = document.createElement("button");
+      const name = document.createElement("span");
+      const value = document.createElement("span");
+      const armed = armedApp === app.name;
+      button.dataset.armed = String(armed);
+      name.textContent = armed ? `tap to quit ${app.name}` : app.name;
+      value.textContent =
+        stat === "cpu" ? `${app.value}%` : app.value >= 1024 ? `${gb(app.value)} gb` : `${app.value} mb`;
+      button.append(name, value);
+      tapOrHold(button, {
+        tap() {
+          if (armedApp !== app.name) return toast("hold to quit it");
+          clearTimeout(disarmApp);
+          armedApp = null;
+          send({ type: "quit-app", name: app.name });
+          renderSheet();
+        },
+        hold() {
+          armedApp = app.name;
+          clearTimeout(disarmApp);
+          disarmApp = setTimeout(() => {
+            armedApp = null;
+            renderSheet();
+          }, 3000);
+          touchingTop = false;
+          renderSheet();
+        },
+      });
+      return button;
+    }),
+  );
+  box.append(label, list);
+}
+["pointerup", "pointercancel"].forEach((type) =>
+  document.addEventListener(type, () => {
+    if (!touchingTop) return;
+    touchingTop = false;
+    // Let the tap's click land on the row before it's rebuilt.
+    setTimeout(renderSheet, 0);
+  }),
+);
 
 /* -------------------------------------------------------------------------- */
 /* Install (HTTPS + certificate)                                              */
@@ -1612,44 +2352,152 @@ const workerReady =
     ? navigator.serviceWorker.register("/sw.js").then(() => true, () => false)
     : Promise.resolve(false);
 
-async function renderInstall() {
-  const text = $("install-text");
-  const actions = $("install-actions");
-  if (window.matchMedia("(display-mode: standalone)").matches) {
-    $("install-card").hidden = true;
-    return;
-  }
-  if (location.protocol === "https:" && (await workerReady)) {
-    text.textContent =
-      "open your browser menu and choose “add to home screen” / “install app”.";
-    return;
-  }
-  const steps =
-    "1. download the certificate below.<br>" +
-    "2. android: settings → security → encryption &amp; credentials → install a certificate → ca certificate. " +
-    "iphone: install the profile, then settings → general → about → certificate trust settings → turn it on.<br>";
-  const download = document.createElement("a");
-  download.href = "/ca.crt";
-  download.innerHTML = "<button style='width:100%'>1. download certificate</button>";
-  if (location.protocol === "https:") {
-    text.innerHTML =
-      "installing needs the phone to trust this laptop's certificate. do this once:<br>" +
-      steps +
-      "3. reload this page and install from the browser menu.";
-    actions.replaceChildren(download);
-    return;
-  }
-  const { httpsPort, address } = await config;
-  text.innerHTML =
-    "this is the plain http address. do this once:<br>" +
-    steps +
-    "3. open the secure version and install from the browser menu.";
-  const secure = document.createElement("a");
-  secure.href = `https://${address}:${httpsPort}/?t=${encodeURIComponent(token ?? "")}`;
-  secure.innerHTML = "<button class='primary' style='width:100%'>3. open secure version</button>";
-  actions.replaceChildren(download, secure);
+const installed = () =>
+  window.matchMedia("(display-mode: standalone)").matches || /** @type {any} */ (navigator).standalone === true;
+
+/** Chrome's own install prompt, kept for the "install now" button. */
+/** @type {any} */
+let installPrompt = null;
+window.addEventListener("beforeinstallprompt", (event) => {
+  event.preventDefault();
+  installPrompt = event;
+  renderSheet();
+});
+
+function renderInstallPill() {
+  const done = installed();
+  $("install-pill").hidden = done;
+  $("title").hidden = !done;
+  if (done && sheet?.kind === "install") closeSheet();
 }
-renderInstall().catch(() => {});
+renderInstallPill();
+window.addEventListener("appinstalled", renderInstallPill);
+$("install-pill").addEventListener("click", () => openSheet({ kind: "install" }));
+
+async function openSecure() {
+  const { httpsPort, address } = await (config ?? fetch("/config.json").then((r) => r.json()));
+  location.href = `https://${address}:${httpsPort}/?t=${encodeURIComponent(token ?? "")}`;
+}
+
+/**
+ * The steps for this phone alone, each ticked off as it's done: the page can
+ * tell when it's on HTTPS and when the certificate is trusted.
+ */
+async function renderInstallSheet() {
+  const trusted = await workerReady;
+  const secure = location.protocol === "https:";
+  const iphone =
+    /iPhone|iPad|iPod/.test(navigator.userAgent) ||
+    (navigator.userAgent.includes("Macintosh") && navigator.maxTouchPoints > 1);
+  const key = JSON.stringify(["install", trusted, secure, iphone, Boolean(installPrompt)]);
+  if (sheet?.kind !== "install" || key === sheetKey) return;
+  sheetKey = key;
+
+  /** @type {{ text: string; done: boolean; button?: { label: string; primary?: boolean; run?: () => void; href?: string } }[]} */
+  const steps = [];
+  if (!secure) {
+    steps.push({ text: "open the secure address of this remote.", done: false, button: { label: "open secure version", primary: true, run: () => void openSecure() } });
+  }
+  steps.push({
+    text: iphone ? "download the laptop's certificate, and allow the profile." : "download the laptop's certificate.",
+    done: trusted,
+    button: trusted ? undefined : { label: "download certificate", href: "/ca.crt" },
+  });
+  if (iphone) {
+    steps.push({ text: "settings → general → vpn & device management → install the hypr-remote profile.", done: trusted });
+    steps.push({ text: "settings → general → about → certificate trust settings → turn on hypr-remote.", done: trusted });
+  } else {
+    steps.push({
+      text: "settings → security → encryption & credentials → install a certificate → ca certificate, and pick the file. (or search settings for “ca certificate”.)",
+      done: trusted,
+    });
+  }
+  steps.push({
+    text: "come back here and reload.",
+    done: trusted,
+    button: trusted || !secure ? undefined : { label: "reload", run: () => location.reload() },
+  });
+  steps.push({
+    text: iphone ? "tap share → add to home screen." : "open the browser menu → install app, or add to home screen.",
+    done: false,
+    button: installPrompt
+      ? {
+          label: "install now",
+          primary: true,
+          run: () =>
+            installPrompt
+              .prompt()
+              .then(() => installPrompt.userChoice)
+              .then(renderInstallPill)
+              .catch(() => {}),
+        }
+      : undefined,
+  });
+
+  const box = $("sheet");
+  box.innerHTML = `
+    <div class="row"><p class="label">install the remote</p><p class="label">once · about 2 minutes</p></div>
+    <p class="hint">it goes on your home screen, opens full screen, and lets you share links and files to the laptop from any app.</p>
+    <ol class="steps"></ol>`;
+  const list = /** @type {HTMLElement} */ (box.querySelector(".steps"));
+  for (const step of steps) {
+    const item = document.createElement("li");
+    item.dataset.done = String(step.done);
+    const body = document.createElement("div");
+    body.textContent = step.text;
+    const action = step.button;
+    if (action && !step.done) {
+      const button = document.createElement("button");
+      button.textContent = action.label;
+      if (action.primary) button.className = "primary";
+      if (action.href) {
+        const link = document.createElement("a");
+        link.href = action.href;
+        link.append(button);
+        body.append(link);
+      } else {
+        button.addEventListener("click", () => action.run?.());
+        body.append(button);
+      }
+    }
+    item.append(body);
+    list.append(item);
+  }
+}
+
+/* -------------------------------------------------------------------------- */
+/* Sharing from other apps (Android)                                          */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * The share sheet posts to /share; the service worker (sw.js) parks what was
+ * shared and reopens the page with ?shared. A link opens on the laptop, text
+ * goes on its clipboard, and files go to ~/Downloads and open there.
+ */
+async function takeShared() {
+  const flag = params.get("shared");
+  if (!flag) return;
+  history.replaceState(null, "", location.pathname);
+  if (flag === "missed") return toast("open the installed remote once, then share again");
+
+  const cache = await caches.open("hypr-remote-share");
+  const response = await cache.match("/shared");
+  if (!response) return;
+  await cache.delete("/shared");
+  const data = await response.formData();
+
+  const files = /** @type {File[]} */ (data.getAll("files").filter((file) => file instanceof File && file.name));
+  if (files.length) return uploadAndOpen(files);
+
+  const texts = ["url", "text", "title"]
+    .map((field) => data.get(field))
+    .filter((value) => typeof value === "string" && value.trim() !== "");
+  const link = texts.map((text) => String(text).match(/https?:\/\/\S+/)?.[0]).find(Boolean);
+  await opened;
+  if (link) send({ type: "open-link", url: link });
+  else if (texts[0]) sendText(String(texts[0]));
+}
+takeShared().catch(() => toast("couldn't take what was shared"));
 
 /* -------------------------------------------------------------------------- */
 /* Input: touchpad and keyboard                                               */

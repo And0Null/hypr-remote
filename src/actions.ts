@@ -1,7 +1,7 @@
 import { z } from "zod";
 
 import { changeVolume, setAppVolume, setOutput, setVolume, toggleMic, toggleMute } from "./features/audio";
-import { CLIPBOARD_LIMIT, getClipboard, setClipboard } from "./features/clipboard";
+import { CLIPBOARD_LIMIT, setClipboard } from "./features/clipboard";
 import { appName, moveWindow, switchWorkspace, windowCommand } from "./features/desktop";
 import { changeBrightness, setBrightness, setNightLight, WARMTH } from "./features/display";
 import { click, KEYS, movePointer, pressKey, scroll, TEXT_LIMIT, typeText, type KeyName } from "./features/input";
@@ -14,7 +14,9 @@ import {
 } from "./features/notifications";
 import { lockScreen, powerOff, setScreens } from "./features/power";
 import { openMenu, setRadio } from "./features/radios";
-import { openLink } from "./features/send";
+import { clickOnScreen } from "./features/screen";
+import { openDownloads, openLink, openReceived } from "./features/send";
+import { quitApp, readTopApps, type TopApp } from "./features/stats";
 import { dispatch, hyprJson, type Client } from "./hypr";
 import { saveScene, tapScene, type Scene } from "./scenes";
 
@@ -82,10 +84,22 @@ export const Action = z.discriminatedUnion("type", [
   // The laptop's own Wi-Fi or Bluetooth menu.
   z.strictObject({ type: z.literal("radio-menu"), device: z.enum(["wifi", "bluetooth"]) }),
 
+  // Text only; images, and taking clips to the phone, go over HTTP (/clipboard, /clip).
   z.strictObject({ type: z.literal("clipboard-set"), text: z.string().max(CLIPBOARD_LIMIT) }),
-  z.strictObject({ type: z.literal("clipboard-get") }),
   // Links only; files go over HTTP (see /upload).
   z.strictObject({ type: z.literal("open-link"), url: z.string().max(4096) }),
+  // After an upload: open the one file that arrived, or the folder for several.
+  z.strictObject({ type: z.literal("open-received"), name: z.string().min(1).max(255) }),
+  z.strictObject({ type: z.literal("open-downloads") }),
+  // A tap on the screen preview, as a fraction of the picture across and down.
+  z.strictObject({
+    type: z.literal("screen-click"),
+    monitor: z.string().max(64),
+    x: z.number().min(0).max(1),
+    y: z.number().min(0).max(1),
+  }),
+  z.strictObject({ type: z.literal("top-apps") }),
+  z.strictObject({ type: z.literal("quit-app"), name: z.string().min(1).max(128) }),
 
   z.strictObject({ type: z.literal("type"), text: z.string().min(1).max(TEXT_LIMIT) }),
   // Named keys, which also drive slides (page-up/down, blank).
@@ -105,7 +119,9 @@ export const Action = z.discriminatedUnion("type", [
 export type Action = z.infer<typeof Action>;
 
 /** A reply sent back to the one phone that asked, rather than broadcast. */
-export type Reply = { type: "clipboard"; text: string } | { type: "toast"; text: string };
+export type Reply =
+  | { type: "toast"; text: string }
+  | { type: "top"; cpu: TopApp[]; memory: TopApp[] };
 
 /**
  * Runs an action. Returns whether the desktop state is worth re-reading
@@ -218,15 +234,36 @@ export async function runAction(
       }
       return { changed: false };
     case "clipboard-set":
+      // The phone says so itself, with "open it there" when it's a link.
       await setClipboard(action.text);
-      return { changed: false, reply: { type: "toast", text: "copied to laptop" } };
-    case "clipboard-get":
-      return { changed: false, reply: { type: "clipboard", text: await getClipboard() } };
+      return { changed: false };
     case "open-link": {
       const opened = await openLink(action.url);
       return {
         changed: false,
         reply: { type: "toast", text: opened ? "opened on laptop" : "that isn't a web link" },
+      };
+    }
+    case "open-received":
+      await openReceived(action.name);
+      return { changed: false };
+    case "open-downloads":
+      await openDownloads();
+      return { changed: false };
+    case "screen-click": {
+      const result = await clickOnScreen(action.monitor, action.x, action.y);
+      if (result === "no-clicks") {
+        return { changed: false, reply: { type: "toast", text: "clicking needs ydotool: run scripts/setup-input.sh" } };
+      }
+      return { changed: true };
+    }
+    case "top-apps":
+      return { changed: false, reply: { type: "top", ...(await readTopApps()) } };
+    case "quit-app": {
+      const quit = await quitApp(action.name);
+      return {
+        changed: true,
+        reply: { type: "toast", text: quit ? `asked ${action.name} to quit` : `couldn't quit ${action.name}` },
       };
     }
     case "type":
