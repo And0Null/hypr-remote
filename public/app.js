@@ -48,6 +48,16 @@ if (fromCode?.startsWith("d_")) {
 }
 if (!token?.startsWith("d_")) token = null;
 
+// An iOS home-screen app launches with an empty localStorage of its own, at the
+// manifest's start_url, so neither the token nor the pairing code reaches it.
+// Point the link at the manifest with this phone's token and the server puts
+// that token in start_url, which the app reads on its first launch and keeps.
+// A phone without a token leaves the link alone and gets the plain manifest.
+if (token) {
+  const manifestLink = /** @type {HTMLLinkElement|null} */ (document.querySelector('link[rel="manifest"]'));
+  if (manifestLink) manifestLink.href = `/manifest.webmanifest?t=${encodeURIComponent(token)}`;
+}
+
 /** What this phone calls itself on the laptop's list of paired phones. */
 async function phoneName() {
   try {
