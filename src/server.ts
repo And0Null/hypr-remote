@@ -212,6 +212,9 @@ function authorised(request: Request, url?: URL) {
  * is how an installed iOS web app learns it (see manifest.ts). The browser asks
  * for the manifest itself, without the x-token header, so the token rides in
  * the query string here. Returns the token the request proved, or null.
+ *
+ * Whether it may be used is decided by manifestFor, which also turns it down
+ * for a plain-HTTP request.
  */
 function pairedTokenForManifest(url: URL) {
   const presented = url.searchParams.get("t");
@@ -351,7 +354,7 @@ async function handle(request: Request, server: Server<Phone>): Promise<Response
   // Answered before the static handler below, which would return the bare file.
   if (url.pathname === "/manifest.webmanifest" && request.method === "GET") {
     const base = await Bun.file(MANIFEST_FILE).json().catch(() => null);
-    const manifest = manifestFor(base, pairedTokenForManifest(url));
+    const manifest = manifestFor(base, pairedTokenForManifest(url), server.url.protocol === "https:");
     if (manifest) {
       return Response.json(manifest, {
         // A manifest that names a token must never be kept: the next reader

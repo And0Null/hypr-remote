@@ -32,6 +32,10 @@ describe("manifestFor", () => {
     expect(manifest.share_target).toEqual({ action: "/share" });
   });
 
+  test("a plain-http request is ignored, however good the token", () => {
+    expect(manifestFor(base, "d_abc123", false)).toEqual(base);
+  });
+
   test("a file on disk that is not a manifest is refused, not served", () => {
     expect(manifestFor(null, "d_abc123")).toBeNull();
     expect(manifestFor({ name: "no start_url" }, null)).toBeNull();

@@ -53,10 +53,14 @@ if (!token?.startsWith("d_")) token = null;
 // Point the link at the manifest with this phone's token and the server puts
 // that token in start_url, which the app reads on its first launch and keeps.
 // A phone without a token leaves the link alone and gets the plain manifest.
-if (token) {
+// Only over https: on http:// the token would ride the request in clear text,
+// and the server ignores it there anyway.
+function pointManifestAtToken() {
+  if (!token || location.protocol !== "https:") return;
   const manifestLink = /** @type {HTMLLinkElement|null} */ (document.querySelector('link[rel="manifest"]'));
   if (manifestLink) manifestLink.href = `/manifest.webmanifest?t=${encodeURIComponent(token)}`;
 }
+pointManifestAtToken();
 
 /** What this phone calls itself on the laptop's list of paired phones. */
 async function phoneName() {
@@ -86,6 +90,10 @@ async function pair() {
   token = String((await response.json()).token);
   storage("set", token);
   pairingCode = null;
+  // Pairing just minted the token the manifest needs, so the link has to be
+  // rewritten now too: a phone that arrived with only the QR code would
+  // otherwise install an app that cannot pair.
+  pointManifestAtToken();
   return true;
 }
 
