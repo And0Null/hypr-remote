@@ -41,14 +41,33 @@ if (fromCode) history.replaceState(null, "", location.pathname);
 /** This phone's own token, once it has one. */
 let token = storage("get");
 /** A pairing code still to trade, from the QR code or an older version. */
-let pairingCode = fromCode && !fromCode.startsWith("d_") ? fromCode : token && !token.startsWith("d_") ? token : null;
+let pairingCode = fromCode && !fromCode.startsWith("d_") && !fromCode.startsWith("l_") ? fromCode : token && !token.startsWith("d_") && !token.startsWith("l_") ? token : null;
 if (fromCode?.startsWith("d_")) {
   token = fromCode;
   storage("set", token);
 }
 if (!token?.startsWith("d_")) token = null;
 
-// An iOS home-screen app launches with an empty localStorage of its own, at the
+// A launch code (l_…) handed off through the manifest's start_url is redeemed
+// for a device token of this phone's own, so re-pairing the browser never
+// revokes the installed app's token.
+const launchCode = fromCode?.startsWith("l_") ? fromCode : null;
+
+/** @param {string} code */
+async function redeemLaunch(code) {
+  try {
+    const response = await fetch("/redeem", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ code, name: await phoneName() }),
+    });
+    if (!response.ok) return;
+    const data = await response.json();
+    token = String(data.token);
+    storage("set", token);
+    pointManifestAtToken();
+  } catch {}
+}
 // manifest's start_url, so neither the token nor the pairing code reaches it.
 // Point the link at the manifest with this phone's token and the server puts
 // that token in start_url, which the app reads on its first launch and keeps.
@@ -4046,8 +4065,12 @@ $("check-updates").addEventListener("click", async () => {
 applySettings();
 showTab(visibleTabs().includes(settings.tab) ? settings.tab : /** @type {string} */ (visibleTabs()[0]));
 
-if (config) {
-  config.then((c) => (c.httpAllowed ? connect() : guideToSecure(c))).catch(connect);
-} else {
-  connect();
-}
+const start = async () => {
+  if (launchCode) await redeemLaunch(launchCode);
+  if (config) {
+    config.then((c) => (c.httpAllowed ? connect() : guideToSecure(c))).catch(connect);
+  } else {
+    connect();
+  }
+};
+start();

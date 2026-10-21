@@ -3,6 +3,7 @@ import { extname, join, normalize } from "node:path";
 import type { Server, ServerWebSocket } from "bun";
 
 import { Action, runAction, type Reply } from "./actions";
+import { issueLaunchCode, redeemLaunchCode } from "./launch";
 import { addDevice, clearDevices, deviceFor, listDevices, loadDevices, removeDevice, touchDevice } from "./devices";
 import { hyprSocket, prepareEnvironment } from "./env";
 import { read } from "./run";
@@ -256,6 +257,21 @@ async function handle(request: Request, server: Server<Phone>): Promise<Response
     return Response.json({ token: own });
   }
 
+  if ((url.pathname === "/redeem" || url.pathname === "/exchange" || url.pathname === "/launch" || url.pathname === "/redeem-launch") && request.method === "POST") {
+    const body = (await request.json().catch(() => null)) as { code?: unknown; launchCode?: unknown; launch_code?: unknown; name?: unknown } | null;
+    const code =
+      typeof body?.code === "string"
+        ? body.code
+        : typeof body?.launchCode === "string"
+          ? body.launchCode
+          : typeof body?.launch_code === "string"
+            ? body.launch_code
+            : null;
+    const name = typeof body?.name === "string" ? body.name : "phone";
+    const own = await redeemLaunchCode(code, name);
+    if (!own) return new Response("Invalid or expired code", { status: 401 });
+    return Response.json({ token: own });
+  }
   // A live look at one monitor.
   if (url.pathname === "/screen") {
     if (!authorised(request)) return new Response("Not paired", { status: 401 });
@@ -354,7 +370,10 @@ async function handle(request: Request, server: Server<Phone>): Promise<Response
   // Answered before the static handler below, which would return the bare file.
   if (url.pathname === "/manifest.webmanifest" && request.method === "GET") {
     const base = await Bun.file(MANIFEST_FILE).json().catch(() => null);
-    const manifest = manifestFor(base, pairedTokenForManifest(url), server.url.protocol === "https:");
+    const presented = pairedTokenForManifest(url);
+    const secure = server.url.protocol === "https:";
+    const handoff = presented && secure ? issueLaunchCode(presented) : null;
+    const manifest = manifestFor(base, handoff, secure);
     if (manifest) {
       return Response.json(manifest, {
         // A manifest that names a token must never be kept: the next reader

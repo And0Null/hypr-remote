@@ -1,6 +1,6 @@
 // Network first, so the remote is never stale; the cached shell only shows
 // when the laptop is unreachable, which beats a browser error page.
-const CACHE = "hypr-remote-v4";
+const CACHE = "hypr-remote-v5";
 const SHELL = ["/", "/app.js", "/manifest.webmanifest", "/icons/icon.svg", "/icons/icon-192.png", "/fonts/Geist-Variable.woff2"];
 
 self.addEventListener("install", (event) => {
